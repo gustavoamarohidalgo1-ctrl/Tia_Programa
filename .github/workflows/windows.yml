@@ -1,0 +1,120 @@
+name: Windows x64
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  instalador:
+    name: Instalador (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar, abrir, recorrer, actualizar
+        shell: pwsh
+        run: ./.github/windows/probar_instalador.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe -SinDesinstalar
+
+      - name: Pruebas del programa con el Python incluido en el instalador
+        if: always()
+        shell: pwsh
+        env:
+          PYTHONUTF8: "0"
+        run: |
+          $py = Join-Path $env:LOCALAPPDATA 'Programs\Agencia de Empleos\runtime\python.exe'
+          & $py -X faulthandler -m unittest discover -v 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\resultados\unittest-instalado.txt"
+          exit $LASTEXITCODE
+
+      - name: Desinstalar
+        if: always()
+        shell: pwsh
+        run: |
+          $i = Join-Path $env:LOCALAPPDATA 'Programs\Agencia de Empleos'
+          if (Test-Path "$i\Desinstalar.exe") {
+            $p = Start-Process "$i\Desinstalar.exe" -ArgumentList '/S', "_?=$i" -Wait -PassThru
+            "Desinstalador -> $($p.ExitCode)"
+            if ($p.ExitCode -ne 0 -or (Test-Path "$i\runtime") -or (Test-Path "$i\app")) { exit 1 }
+            if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Agencia de Empleos\agencia.db'))) { "Borró los datos"; exit 1 }
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-instalador-${{ matrix.os }}
+          path: ${{ runner.temp }}/resultados
+          if-no-files-found: ignore
+
+  codigo:
+    name: Código fuente (Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: x64
+      - name: Pruebas
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\resultados" | Out-Null
+          python -X faulthandler -m unittest discover -v 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\resultados\unittest.txt"
+          exit $LASTEXITCODE
+      - name: Recorrido completo desde el código
+        if: always()
+        shell: pwsh
+        run: |
+          python .github/windows/humo.py . "$env:RUNNER_TEMP\datos-humo"
+          exit $LASTEXITCODE
+      - name: Iniciar.bat
+        if: always()
+        shell: pwsh
+        run: |
+          $datos = Split-Path -Parent (Resolve-Path agencia.py)
+          ./.github/windows/abrir_programa.ps1 -Archivo "$PWD\Iniciar.bat" -Proceso pythonw -Datos $datos -Nombre "iniciar-bat-${{ matrix.python }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-codigo-${{ matrix.python }}
+          path: ${{ runner.temp }}/resultados
+          if-no-files-found: ignore
+
+  portable:
+    name: EXE portable (Crear_EXE.bat)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Crear_EXE.bat
+        shell: cmd
+        run: Crear_EXE.bat < NUL
+      - name: Abrir Agencia.exe
+        shell: pwsh
+        run: |
+          if (-not (Test-Path Agencia.exe)) { "No se creó Agencia.exe"; exit 1 }
+          $datos = Join-Path $env:LOCALAPPDATA 'Agencia de Empleos'
+          ./.github/windows/abrir_programa.ps1 -Archivo "$PWD\Agencia.exe" -Proceso Agencia -Datos $datos -Nombre 'exe-portable'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-portable
+          path: ${{ runner.temp }}/resultados
+          if-no-files-found: ignore
