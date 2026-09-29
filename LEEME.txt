@@ -1,0 +1,137 @@
+AGENCIA DE EMPLEOS "SERVICIO EXCLUSIVO" - Programa para Windows
+================================================================
+Version de distribucion: 1.7.1 (Windows y Mac).
+
+INSTALAR (una sola vez)
+  1. Descargue Python desde https://www.python.org/downloads/
+  2. Al instalar, marque la casilla "Add Python to PATH".
+
+ABRIR EL PROGRAMA
+  Doble clic en "Iniciar.bat". Se abre en pantalla completa.
+  F11 = pantalla completa total. Esc = salir de ella.
+  (Opcional) Doble clic en "Crear_EXE.bat" para crear "Agencia.exe".
+  Deje el .exe en esta carpeta: los datos se guardan junto a el.
+  En Mac: doble clic en "Crear_App_Mac.command" crea "Agencia de Empleos.app", con el
+  nombre y el icono de la agencia en el Dock (en vez de "Python"). Dejela en esta carpeta.
+  Este lanzador usa el Python instalado en este equipo y muestra su minimo real
+  de macOS al crearlo. Los instaladores incluyen su propio Python.
+  Crear_EXE.bat incluye logo e iconos, usa un entorno temporal aislado y se
+  detiene ante errores sin copiar un ejecutable anterior como si fuera nuevo.
+
+SEGURIDAD DE LOS DATOS
+  Los datos se guardan en el momento (cada cambio llega al disco). Ademas:
+  - Copia automatica al abrir el programa, cada 24 horas si hubo cambios, al
+    cerrarlo y antes de borrar algo. Cada copia se verifica antes de aceptarla.
+  - Copia FUERA del programa, en Documentos\Respaldos Agencia de Empleos: una por
+    dia (ultimos 30 dias) y los datos en archivos .csv que abre Excel.
+  - Para RESTAURAR una copia, hacer una ahora o elegir una carpeta adicional (USB,
+    OneDrive...): pulse Cmd+Shift+B (Mac) o Ctrl+Shift+B (Windows).
+  - Borrar un cliente/trabajadora o deshacer una asignacion guarda antes una
+    copia y avisa de lo que se perderia (comisiones cobradas, contratos).
+  - Lo que escribe se GUARDA SOLO al pasar a otro registro, cambiar de seccion o
+    cerrar el programa, sin avisos. Si a un registro nuevo le faltan datos
+    obligatorios, queda como borrador y reaparece al pulsar "Nuevo" (incluso
+    al abrir el programa otra vez). Si la base se dana o desaparece, la
+    recupera de las copias.
+  Consejo: elija tambien una carpeta adicional en un USB o en OneDrive.
+
+INSTALADORES (carpeta "instaladores")
+  Agencia-de-Empleos-Mac-arm64.dmg      Mac con chip Apple (M1 o posterior).
+  Agencia-de-Empleos-Windows-x64.exe    Windows 10 u 11 de 64 bits.
+  Traen todo lo necesario: no hay que instalar Python.
+  El constructor Mac prefiere Python 3.12 y calcula el minimo real de macOS a
+  partir de todos los binarios incluidos. El requisito aparece dentro del DMG.
+  MAC:     abra el .dmg y arrastre la app a "Aplicaciones". La primera vez: clic
+           derecho sobre la app > Abrir > Abrir (el Mac avisa porque la app no
+           esta firmada por Apple).
+  WINDOWS: doble clic en el instalador. Si aparece "Windows protegio su PC":
+           "Mas informacion" > "Ejecutar de todas formas". No pide administrador.
+  Los datos NO se guardan dentro del programa, asi que actualizar o desinstalar
+  no los borra (el desinstalador de Windows pregunta y por defecto los conserva):
+    Mac:      ~/Library/Application Support/Agencia de Empleos
+    Windows:  %LOCALAPPDATA%\Agencia de Empleos   (acceso "Datos de la agencia")
+  Para volver a crearlos tras cambiar el programa: instaladores/construccion
+  (crear_instalador_mac.sh y crear_instalador_windows.sh).
+  Las construcciones usan temporales independientes y reemplazan el paquete
+  anterior solo despues de generar y verificar el nuevo.
+  Se distribuyen codigo y recursos: no se incluyen bases, contratos,
+  respaldos, pruebas ni datos personales del equipo que crea el instalador.
+
+SECCIONES
+  Clientes      Nuevo cliente y cuestionario del pedido (sueldo, zona,
+                servicio, horario...). Pestana
+                "Clientes registrados" para ver y editar.
+                "Tipo de servicio" (y "Especialidad" de la trabajadora): se puede
+                escribir y sugiere mientras se escribe, o abrir la lista con la flecha.
+  Trabajadoras  Perfil y documentos.
+  Areas         Un cuadro por area (Nineras, Cama adentro...). Con "Nueva area" y
+                "Eliminar area..." la agencia crea o quita sus propias areas: aparecen
+                tambien en "Tipo de servicio" del cliente y en "Especialidad" de la
+                trabajadora. Solo se elimina un area sin clientes ni trabajadoras.
+                Dentro de un area:
+                elija el cliente y la trabajadora, y pulse Asignar.
+                Revise los datos del contrato y confirme la asignacion.
+                Luego puede firmar, imprimir o deshacer desde Asignaciones.
+                Al firmar el contrato, el trabajo y la garantia empiezan
+                solos desde la fecha del contrato. Use "Ver asignaciones" para abrir
+                contratos anteriores, incluidos los ya firmados.
+  Comisiones    Por cobrar, cobrado y cobrado este mes. La comision puede ser un
+                monto o un PORCENTAJE del sueldo (20%, 12.5%...): al preparar el
+                contrato se escribe uno y el otro se calcula solo. El contrato
+                imprime ambos ("S/ 300.00, equivalente al veinte por ciento
+                (20 %) del sueldo mensual pactado de S/ 1,500.00"). Marcar como
+                pagada o cambiar sueldo, porcentaje o monto.
+  Ganancias     Resumen de comisiones cobradas y pendientes, ingresos
+                por area y ultimos pagos. No calcula ganancia neta
+                porque el programa no registra gastos.
+  Garantias     Solo clientes que pidieron garantia. Los MESES se escriben al
+                preparar el contrato (por defecto 2; cualquier numero; 0 = sin
+                garantia). Corren desde la
+                fecha del contrato. Se imprimen en el contrato en letras y numero
+                (por ejemplo "tres (3) meses"). Pestanas: Pendientes, Cerradas y
+                Sin garantia. Solicitar reemplazo: el cliente vuelve a pendiente y
+                la nueva asignacion no cobra comision y conserva sus meses.
+
+NOTA SOBRE LA FIRMA
+  Cada persona puede dibujar su firma en pantalla o pulsar "Firmar con nombre"
+  en su propio recuadro. El nombre se muestra con estilo de firma y se guarda
+  en el contrato. Use esta opcion solo cuando la persona acepte firmar asi.
+  No es una firma digital certificada (con certificado electronico).
+
+DATOS
+  agencia.db  -> toda la informacion (haga copias de seguridad de este archivo)
+  logo.png    -> logo del menu lateral (dejelo en esta carpeta)
+  icono.png / icono.ico / icono.icns -> icono de la aplicacion (ventana, barra de
+                 tareas, Dock). Dejelos en esta carpeta; el .exe usa icono.ico.
+  contratos\  -> contratos generados
+
+AJUSTES (al inicio de agencia.py)
+  AGENCIA_NOMBRE, AGENCIA_ESLOGAN, AGENCIA_RUC, AGENCIA_DOMICILIO,
+  CIUDAD_CONTRATO, MONEDA, COBRO_DEFECTO (pago unico, S/ 300.00),
+  PORCENTAJE_DEFECTO (por ejemplo 20 para proponer el 20% del sueldo; None = usar
+  el monto) y MESES_GARANTIA (2, los meses que se proponen por defecto).
+
+ACTUALIZAR CON SEGURIDAD (VERSION 1.7.1)
+  Guarde su trabajo y cierre el programa antes de actualizarlo en Mac o Windows.
+  Windows comprueba si los archivos estan en uso y bloquea la actualizacion o
+  desinstalacion si encuentra una instancia abierta o no puede verificarlo.
+  Dos instaladores de la misma agencia no pueden ejecutarse a la vez.
+  Los archivos nuevos se preparan por separado antes de reemplazar la version
+  anterior. Si el reemplazo falla, se intenta recuperar esa version. Si Windows
+  tambien impide recuperarla, el mensaje indica donde quedaron los originales.
+  La carpeta normal de datos se conserva; al desinstalar, borrarla sigue siendo
+  una opcion explicita y la respuesta predeterminada es No.
+  Si hay agencia.db, contratos, respaldos, configuracion.json, borradores.json
+  o errores.log dentro de app/runtime, se detiene el cambio para conservarlos.
+  Haga una copia y cambie esa ubicacion antes de actualizar o desinstalar.
+
+CONSERVACION DE COPIAS Y CONTRATOS
+  Una restauracion comprueba y actualiza una copia temporal antes de sustituir
+  la base abierta. Conserva la base anterior si falla esa preparacion y guarda
+  un resguardo si no puede completar la recuperacion.
+  La misma base abierta, incluso con otro nombre o acceso directo, no se puede
+  elegir como fuente de restauracion.
+  Al actualizar, los contratos firmados anteriores se conservan como documento
+  cuando las fichas relacionadas todavia existen. Corregir una ficha despues
+  no reescribe ese documento. Un contrato sin sus personas conserva sus datos
+  existentes y no inventa informacion para reconstruir un pasado desconocido.

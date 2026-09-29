@@ -1,0 +1,2 @@
+3c6fe87bf41ce9f9f2995c79f0d084018e9ad21689ed98e3bb2a15c313a24dda  Agencia-de-Empleos-Windows-x64.exe
+f98f37b9cd13fbbb6dd844fb70c15f405412d130089d5a3cdea3b8ac1ccd5650  Agencia-de-Empleos-Mac-arm64.dmg
