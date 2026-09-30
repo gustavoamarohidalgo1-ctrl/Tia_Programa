@@ -50,22 +50,26 @@ jobs:
           if-no-files-found: ignore
 
   usuario:
-    name: Usuario con tildes (${{ matrix.os }})
+    name: Cuenta estándar ${{ matrix.cuenta }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
+        cuenta: [tildes, simple]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Instalar y usar como "José Peña"
+      - name: Instalar y usar con otra cuenta de Windows
         shell: pwsh
-        run: ./.github/windows/otro_usuario.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe
+        run: |
+          $extra = @{}
+          if ('${{ matrix.cuenta }}' -eq 'simple') { $extra.Usuario = 'Prueba Agencia' }
+          ./.github/windows/otro_usuario.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe @extra
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: resultados-usuario-${{ matrix.os }}
+          name: resultados-usuario-${{ matrix.cuenta }}-${{ matrix.os }}
           path: ${{ runner.temp }}/resultados
           if-no-files-found: ignore
 

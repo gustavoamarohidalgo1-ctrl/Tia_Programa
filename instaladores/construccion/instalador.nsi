@@ -5,6 +5,8 @@
 
 Unicode true
 SetCompressor /SOLID lzma
+ManifestSupportedOS all    ; que Windows 8.1, 10 y 11 se reconozcan por su versión real
+ManifestDPIAware true      ; texto nítido en pantallas con escala 125 % o 150 %
 
 !define NOMBRE "Agencia de Empleos"
 !define CLAVE_DESINSTALAR "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenciaDeEmpleos"
@@ -26,7 +28,7 @@ VIAddVersionKey /LANG=1034 "ProductVersion" "${VERSION}"
 VIAddVersionKey /LANG=1034 "LegalCopyright" "${NOMBRE}"
 
 !include "MUI2.nsh"
-!include "${RAIZ}/instaladores/construccion/archivos_en_uso.nsh"
+!include "${RAIZ}\instaladores\construccion\archivos_en_uso.nsh"
 !define MUI_ICON "${ICONO}"
 !define MUI_UNICON "${ICONO}"
 !define MUI_ABORTWARNING
@@ -65,10 +67,10 @@ Section "Instalar"
   Delete "$Actualizacion"
   CreateDirectory "$Actualizacion"
   SetOutPath "$Actualizacion\runtime"
-  File /r "${RUNTIME}/*"
+  File /r "${RUNTIME}\*"
   IfErrors fallo_preparacion
   SetOutPath "$Actualizacion\app"
-  File /r "${APLICACION}/*"
+  File /r "${APLICACION}\*"
   IfErrors fallo_preparacion
   WriteUninstaller "$Actualizacion\Desinstalar.exe"
   IfErrors fallo_preparacion

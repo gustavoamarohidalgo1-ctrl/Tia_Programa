@@ -1,6 +1,10 @@
 ; Protecciones nativas antes de tocar archivos de una instalación.
 ; Restart Manager: https://learn.microsoft.com/windows/win32/api/restartmanager/nf-restartmanager-rmgetlist
 ; Sólo consulta procesos; nunca los cierra ni programa borrados tras reiniciar.
+!include "LogicLib.nsh"
+!include "x64.nsh"
+!include "WinVer.nsh"
+
 Var CerrojoInstalador
 Var Actualizacion
 Var RuntimeAnterior
@@ -12,6 +16,20 @@ Var DesinstaladorPublicado
 
 !macro CERROJO_INSTALADOR PREFIJO
 Function ${PREFIJO}.onInit
+  !if "${PREFIJO}" == ""
+  ; El Python incluido es de 64 bits y necesita Windows 8.1 o posterior: avisar claro en vez de instalar algo
+  ; que despues no abre. Windows 11 en ARM ejecuta programas x64, asi que tambien se admite.
+  ${IfNot} ${RunningX64}
+    MessageBox MB_OK|MB_ICONSTOP "Este instalador es para Windows de 64 bits y este equipo tiene Windows de 32 bits.$\r$\n$\r$\nNo se modifico nada." /SD IDOK
+    SetErrorLevel 5
+    Abort
+  ${EndIf}
+  ${IfNot} ${AtLeastWin8.1}
+    MessageBox MB_OK|MB_ICONSTOP "${NOMBRE} necesita Windows 10 u 11 (o Windows 8.1). Este equipo tiene una version anterior de Windows.$\r$\n$\r$\nNo se modifico nada." /SD IDOK
+    SetErrorLevel 5
+    Abort
+  ${EndIf}
+  !endif
   ; Evita que dos actualizadores/desinstaladores de la misma marca publiquen a la vez.
   System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\Instalador.${NOMBRE}") p .r0 ?e'
   Pop $1

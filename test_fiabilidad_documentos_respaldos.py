@@ -183,7 +183,7 @@ class ConservacionFinalTest(unittest.TestCase):
         with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), patch("webbrowser.open") as abrir:
             self.pagina.imprimir_contrato(c)
         abrir.assert_called_once()
-        self.assertIn("Cliente ficticio", (self.root / f"contrato_{self.id}.html").read_text())
+        self.assertIn("Cliente ficticio", (self.root / f"contrato_{self.id}.html").read_text(encoding="utf-8"))
 
     def test_impresion_fallida_no_trunca_documento_anterior(self):
         c = self.firmar()

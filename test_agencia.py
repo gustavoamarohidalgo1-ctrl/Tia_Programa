@@ -10,6 +10,7 @@ import unittest
 from datetime import date, datetime, timedelta
 from unittest import mock
 from pathlib import Path
+from contextlib import closing
 
 import agencia
 from agencia import (BaseDatos, area_de_texto, filtrar_opciones, sin_acentos, sinonimos_de_area, cargar_areas, restablecer_areas, base_sana, buscar_restauracion, carpetas_externas, con_garantia, contar_datos,
@@ -37,7 +38,7 @@ class LotesDeBaseDatos(unittest.TestCase):
                 raise RuntimeError("fallo simulado")
 
         self.assertEqual(self.db.todos("clientes"), [])
-        with sqlite3.connect(self.ruta) as conexion:
+        with closing(sqlite3.connect(self.ruta)) as conexion, conexion:
             self.assertEqual(conexion.execute("SELECT count(*) FROM clientes").fetchone()[0], 0)
 
     def test_un_lote_interno_puede_revertirse_sin_perder_el_externo(self):
@@ -50,7 +51,7 @@ class LotesDeBaseDatos(unittest.TestCase):
             self.assertEqual(self.db.uno("clientes", cliente)["nombre"], "Guardar")
             self.db.insertar("trabajadoras", {"nombre": "Trabajadora"})
 
-        with sqlite3.connect(self.ruta) as conexion:
+        with closing(sqlite3.connect(self.ruta)) as conexion, conexion:
             self.assertEqual(conexion.execute("SELECT nombre FROM clientes").fetchone()[0], "Guardar")
             self.assertEqual(conexion.execute("SELECT count(*) FROM trabajadoras").fetchone()[0], 1)
 
@@ -334,7 +335,7 @@ class BaseDanadaYRespaldos(unittest.TestCase):
         Path(self.ruta + "-journal").write_bytes(b"resto")
         aviso = restaurar_si_esta_danada(self.ruta, self.respaldos)
         self.assertIn("agencia-auto-20260927-120000.db", aviso)
-        with sqlite3.connect(self.ruta) as con:
+        with closing(sqlite3.connect(self.ruta)) as con, con:
             self.assertEqual(con.execute("SELECT nombre FROM clientes").fetchone()[0], "Ana")
         nombres = os.listdir(self.respaldos)
         self.assertTrue(any(n.startswith("agencia-danada-") and n.endswith(".db") for n in nombres))
@@ -515,7 +516,7 @@ class MotorDeCopias(unittest.TestCase):
 
     def test_una_base_con_tablas_de_una_version_anterior_cuenta_sus_datos(self):
         antigua = str(self.carpeta / "antigua.db")
-        with sqlite3.connect(antigua) as con:
+        with closing(sqlite3.connect(antigua)) as con, con:
             con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY, nombre TEXT)")
             con.execute("INSERT INTO clientes (nombre) VALUES ('Ana')")
         self.assertEqual(contar_datos(antigua), {"clientes": 1, "trabajadoras": 0, "colocaciones": 0})
@@ -547,7 +548,7 @@ class MotorDeCopias(unittest.TestCase):
         self.assertGreater(self.db.version, version)
         # una copia de una versión antigua, sin las columnas nuevas, se completa sola
         antigua = str(self.carpeta / "antigua.db")
-        with sqlite3.connect(antigua) as con:
+        with closing(sqlite3.connect(antigua)) as con, con:
             con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT DEFAULT '')")
             con.execute("INSERT INTO clientes (nombre) VALUES ('Vieja')")
         self.db.restaurar_desde(antigua)
@@ -605,7 +606,9 @@ class IconoDeLaAplicacion(unittest.TestCase):
         root.withdraw()
         try:
             agencia.poner_icono(root)
-            if agencia.tk.TkVersion >= 8.6:   # Tk 8.5 no lee PNG: ahí abre con el ícono por defecto
+            if agencia.ES_WINDOWS:   # Windows usa el .ico (barra de título y de tareas) en vez del PNG
+                self.assertTrue(os.path.isfile(agencia.ICONO_ICO))
+            elif agencia.tk.TkVersion >= 8.6:   # Tk 8.5 no lee PNG: ahí abre con el ícono por defecto
                 self.assertEqual(root._icono.width(), 256)
             ruta_png, ruta_ico, ruta_logo = agencia.ICONO_PNG, agencia.ICONO_ICO, agencia.LOGO_PATH
             agencia.ICONO_PNG = agencia.ICONO_ICO = agencia.LOGO_PATH = "/no/existe.png"
@@ -637,7 +640,7 @@ class CarpetaDeDatos(unittest.TestCase):
                 agencia.sys.executable = os.path.join(vacia, "programa")
                 try:
                     self.assertEqual(self.datos(plataforma="darwin"),
-                                     "/Users/ana/Library/Application Support/" + agencia.AGENCIA_NOMBRE)
+                                     os.path.join("/Users/ana", "Library", "Application Support", agencia.AGENCIA_NOMBRE))
                     self.assertEqual(self.datos(plataforma="win32", entorno={"LOCALAPPDATA": "C:\\L"}),
                                      os.path.join("C:\\L", agencia.AGENCIA_NOMBRE))
                     self.assertEqual(self.datos(plataforma="linux"),
@@ -716,7 +719,7 @@ class AreasEnLaBase(unittest.TestCase):
         self.assertEqual(set(contar_datos(self.ruta)), {"clientes", "trabajadoras", "colocaciones"})
 
     def test_una_base_antigua_recibe_las_areas_una_sola_vez(self):
-        with sqlite3.connect(self.ruta) as con:
+        with closing(sqlite3.connect(self.ruta)) as con, con:
             con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT DEFAULT '', "
                         "tipo_servicio TEXT DEFAULT '')")
             con.execute("INSERT INTO clientes (nombre, tipo_servicio) VALUES ('Ana', 'Niñera')")
@@ -746,7 +749,7 @@ class AreasEnLaBase(unittest.TestCase):
         db = BaseDatos(self.ruta)
         db.insertar("clientes", {"nombre": "Ana"})
         antigua = str(Path(self.temporal.name) / "antigua.db")
-        with sqlite3.connect(antigua) as con:
+        with closing(sqlite3.connect(antigua)) as con, con:
             con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT DEFAULT '')")
             con.execute("INSERT INTO clientes (nombre) VALUES ('Vieja')")
         db.restaurar_desde(antigua)
@@ -942,7 +945,7 @@ class MesesDeGarantiaVariables(unittest.TestCase):
     def test_los_clientes_antiguos_pasan_de_si_no_a_meses_sin_perder_nada(self):
         with tempfile.TemporaryDirectory() as carpeta:
             ruta = str(Path(carpeta) / "agencia.db")
-            with sqlite3.connect(ruta) as con:
+            with closing(sqlite3.connect(ruta)) as con, con:
                 con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT DEFAULT '', "
                             "garantia TEXT DEFAULT '')")
                 con.executemany("INSERT INTO clientes (nombre, garantia) VALUES (?, ?)",
@@ -974,7 +977,7 @@ class MesesDeGarantiaVariables(unittest.TestCase):
         with tempfile.TemporaryDirectory() as carpeta:
             base = Path(carpeta)
             ruta = str(base / "agencia.db")
-            with sqlite3.connect(ruta) as con:
+            with closing(sqlite3.connect(ruta)) as con, con:
                 con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT DEFAULT '', "
                             "garantia TEXT DEFAULT '')")
                 con.execute("INSERT INTO clientes (nombre, garantia) VALUES ('Ana', 'Sí')")
@@ -986,7 +989,7 @@ class MesesDeGarantiaVariables(unittest.TestCase):
             copias = listar_copias([(str(base / "respaldos"), "Programa")])
             self.assertEqual([c["tipo"] for c in copias], ["Antes de actualizar"])
             self.assertEqual(copias[0]["clientes"], 1)
-            with sqlite3.connect(copias[0]["ruta"]) as con:                    # es la copia de ANTES: estructura vieja
+            with closing(sqlite3.connect(copias[0]["ruta"])) as con, con:                    # es la copia de ANTES: estructura vieja
                 self.assertNotIn("meses_garantia", [r[1] for r in con.execute("PRAGMA table_info(clientes)")])
 
     def test_la_pantalla_garantias_muestra_los_meses_de_cada_cliente(self):
@@ -1155,7 +1158,7 @@ class ProgramaConDatosProtegidos(unittest.TestCase):
     def test_al_cerrar_lo_escrito_se_guarda_solo_y_no_se_pregunta_nada(self):
         self.escribir_cliente("Luis")
         self.app.cerrar()
-        with sqlite3.connect(agencia.DB_PATH) as con:
+        with closing(sqlite3.connect(agencia.DB_PATH)) as con, con:
             self.assertEqual(con.execute("SELECT nombre FROM clientes").fetchone()[0], "Luis")
         self.assertEqual(self.sin_avisos(), [])
         with self.assertRaises(agencia.tk.TclError):

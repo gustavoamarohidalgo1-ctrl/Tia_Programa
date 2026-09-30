@@ -15,6 +15,7 @@ RAIZ = Path(__file__).resolve().parent
 
 
 class InstaladoresProtegidos(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "Crear_App_Mac.command solo se ejecuta en Mac")
     def test_launcher_rechaza_proceso_vivo_antes_de_tocar_bundle(self):
         for proyecto, marca, ejecutable in ((RAIZ, "Agencia de Empleos", "Agencia"),):
             with self.subTest(proyecto=proyecto.name), tempfile.TemporaryDirectory(prefix="launcher-fiabilidad-") as tmp:
@@ -45,7 +46,7 @@ class InstaladoresProtegidos(unittest.TestCase):
     def test_exe_portable_tiene_version_y_publica_sin_sobrescribir_anterior(self):
         for proyecto, marca in ((RAIZ, "Agencia de Empleos"),):
             with self.subTest(proyecto=proyecto.name):
-                metadata = ast.parse((proyecto / "instaladores/construccion/version_windows.txt").read_text())
+                metadata = ast.parse((proyecto / "instaladores/construccion/version_windows.txt").read_text(encoding="utf-8"))
                 cadenas = {n.args[0].value: n.args[1].value for n in ast.walk(metadata)
                            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "StringStruct"}
                 self.assertEqual(cadenas["ProductName"], marca)
@@ -107,7 +108,7 @@ class InstaladoresProtegidos(unittest.TestCase):
     def test_guardias_preceden_borrados_y_datos_no_se_incluyen_en_staging(self):
         for proyecto in (RAIZ,):
             with self.subTest(proyecto=proyecto.name):
-                fuente = (proyecto / "instaladores/construccion/instalador.nsi").read_text()
+                fuente = (proyecto / "instaladores/construccion/instalador.nsi").read_text(encoding="utf-8")
                 instalar = fuente.split('Section "Instalar"', 1)[1].split("SectionEnd", 1)[0]
                 self.assertNotIn('RMDir /r "$INSTDIR\\runtime"', instalar)
                 self.assertNotIn('RMDir /r "$INSTDIR\\app"', instalar)
@@ -117,7 +118,7 @@ class InstaladoresProtegidos(unittest.TestCase):
                 desinstalar = fuente.split('Section "Uninstall"', 1)[1]
                 self.assertLess(desinstalar.index("Call un.ComprobarArchivosEnUso"), desinstalar.index("RMDir /r"))
                 self.assertLess(desinstalar.index("Call un.ComprobarDatosHeredados"), desinstalar.index("RMDir /r"))
-                guardia = (proyecto / "instaladores/construccion/archivos_en_uso.nsh").read_text()
+                guardia = (proyecto / "instaladores/construccion/archivos_en_uso.nsh").read_text(encoding="utf-8")
                 self.assertIn("RmGetList", guardia)
                 self.assertNotIn("RmShutdown", guardia)
                 for recurso in ("agencia.db", "contratos", "respaldos", "configuracion.json", "borradores.json", "errores.log"):

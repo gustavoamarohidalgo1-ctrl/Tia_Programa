@@ -5545,7 +5545,10 @@ def _iterar_copias(carpetas):
                         continue
                     try:
                         if entrada.is_file():
-                            archivos.append((entrada.stat(), entrada.path, nombre, donde))
+                            # En Windows, DirEntry.stat() deja st_ino y st_dev en cero: la firma no coincidiría
+                            # con la de os.stat() y los recuentos nunca se reutilizarían.
+                            estado = os.stat(entrada.path) if ES_WINDOWS else entrada.stat()
+                            archivos.append((estado, entrada.path, nombre, donde))
                     except OSError:
                         continue
         except OSError:

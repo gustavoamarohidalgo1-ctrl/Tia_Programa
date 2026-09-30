@@ -10,6 +10,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from contextlib import closing
 
 import agencia
 
@@ -221,7 +222,7 @@ class FiabilidadExportacionTest(unittest.TestCase):
     def test_fuente_antigua_sin_tablas_exporta_vacios_en_lugar_de_datos_previos(self):
         self.preparar_anteriores()
         antigua = self.carpeta / "antigua.db"
-        with sqlite3.connect(antigua) as con:
+        with closing(sqlite3.connect(antigua)) as con, con:
             con.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY, nombre TEXT)")
             con.execute("INSERT INTO clientes VALUES (1, 'Cliente antiguo')")
         agencia.exportar_legible(str(antigua), str(self.destino))
@@ -240,7 +241,7 @@ class FiabilidadExportacionTest(unittest.TestCase):
             nonlocal cambiado
             if valor == "Cliente actual" and not cambiado:
                 cambiado = True
-                with sqlite3.connect(self.ruta) as otra:
+                with closing(sqlite3.connect(self.ruta)) as otra, otra:
                     otra.execute("UPDATE clientes SET nombre='Cliente posterior'")
                     otra.execute("UPDATE trabajadoras SET nombre='Trabajadora posterior'")
             return original(valor)

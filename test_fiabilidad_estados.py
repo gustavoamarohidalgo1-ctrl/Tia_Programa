@@ -3,7 +3,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -126,7 +126,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
     def test_borrado_revalida_persona_editada_desde_otra_instancia(self):
         t = self.trabajadora()
         persona = self.db.uno("trabajadoras", t)
-        with sqlite3.connect(self.ruta) as otra:
+        with closing(sqlite3.connect(self.ruta)) as otra, otra:
             otra.execute("UPDATE trabajadoras SET telefono='999000111' WHERE id=?", (t,))
         with self.assertRaises(ValueError):
             self.app.eliminar_persona("trabajadoras", t, [], persona)
@@ -154,7 +154,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
         cli, t = self.cliente(), self.trabajadora()
         enlace = self.enlace(cli, t)
         antiguo = self.fila(enlace)
-        with sqlite3.connect(self.ruta) as otra:
+        with closing(sqlite3.connect(self.ruta)) as otra, otra:
             otra.execute("UPDATE colocaciones SET comision_pagada='1', contrato_firmado='1' WHERE id=?", (enlace,))
         with self.assertRaisesRegex(ValueError, "cambió"):
             self.app.deshacer_enlace(antiguo)
@@ -250,7 +250,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
         cli, t = self.cliente("En entrevista"), self.trabajadora("En proceso")
         enlace = self.enlace(cli, t)
         antiguo = self.fila(enlace)
-        with sqlite3.connect(self.ruta) as otra:
+        with closing(sqlite3.connect(self.ruta)) as otra, otra:
             otra.execute("UPDATE colocaciones SET estado='Reemplazo solicitado' WHERE id=?", (enlace,))
         self.assertFalse(self.app.iniciar_asignacion(antiguo, date(2026, 1, 20)))
         self.assertEqual(self.fila(enlace)["estado"], "Reemplazo solicitado")
@@ -299,7 +299,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
         cli, t = self.cliente("Colocado"), self.trabajadora("Trabajando")
         enlace = self.enlace(cli, t, estado="Activa", fin_garantia="01/01/2026")
         self.db.todos("colocaciones")
-        with sqlite3.connect(self.ruta) as otra:
+        with closing(sqlite3.connect(self.ruta)) as otra, otra:
             otra.execute("UPDATE colocaciones SET estado='Reemplazo solicitado' WHERE id=?", (enlace,))
         self.app.cerrar_garantias_vencidas()
         self.assertEqual(self.fila(enlace)["estado"], "Reemplazo solicitado")
@@ -314,7 +314,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
                 self.assertEqual(self.app._vinculos_ocupantes("trabajadoras", t), {})
                 raise RuntimeError("revertir")
         self.assertEqual(self.app._vinculos_ocupantes("trabajadoras", t), {str(enlace): "En proceso"})
-        with sqlite3.connect(self.ruta) as otra:
+        with closing(sqlite3.connect(self.ruta)) as otra, otra:
             otra.execute("UPDATE colocaciones SET estado='Activa' WHERE id=?", (enlace,))
         with self.app.cambio_de_estados():
             self.assertEqual(self.app._vinculos_ocupantes("trabajadoras", t), {str(enlace): "Activa"})
@@ -351,7 +351,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
             nonlocal ejecutado
             if not ejecutado:
                 ejecutado = True
-                with sqlite3.connect(self.ruta) as otra:
+                with closing(sqlite3.connect(self.ruta)) as otra, otra:
                     otra.execute("UPDATE colocaciones SET contrato_firmado='1' WHERE id=?", (ids[1],))
             with original():
                 yield
@@ -367,7 +367,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
         original = self.app.cambio_de_estados
         @contextmanager
         def reservar():
-            with sqlite3.connect(self.ruta) as otra:
+            with closing(sqlite3.connect(self.ruta)) as otra, otra:
                 otra.execute("UPDATE colocaciones SET fin_garantia='01/01/2026' WHERE id=?", (ids[1],))
             with original():
                 yield
