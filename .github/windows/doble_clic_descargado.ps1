@@ -78,11 +78,17 @@ while (((Get-Date) - $inicio).TotalSeconds -lt $Espera) {
     }
     # Los avisos normales de Windows para archivos descargados: se aceptan como lo haría la persona
     $r = $null
-    if ($titulo -match 'Windows protected your PC|Windows protegi' -or $pn -eq 'smartscreen') {
-      $r = Pulsar $v @('More info', 'Más información', 'Mas información')
-      Start-Sleep -Milliseconds 800
-      $r2 = Pulsar $v @('Run anyway', 'Ejecutar de todas formas', 'Ejecutar de todos modos')
-      $r = "$r / $r2"
+    # «Windows protegió su PC» (SmartScreen): la ventana no tiene título; se reconoce por su enlace «Más información»
+    $r1 = Pulsar $v @('More info', 'Más información', 'Mas información')
+    if ($r1) {
+      Start-Sleep -Milliseconds 1500
+      $r2 = $null
+      for ($i = 0; $i -lt 6 -and -not $r2; $i++) {
+        $r2 = Pulsar $v @('Run anyway', 'Ejecutar de todas formas', 'Ejecutar de todos modos')
+        if (-not $r2) { Start-Sleep -Milliseconds 700 }
+      }
+      $r = "SmartScreen: $r1 / $r2"
+      Captura 'smartscreen-despues'
     } elseif ($titulo -match 'Security Warning|Advertencia de seguridad') {
       $r = Pulsar $v @('Run', '&Run', 'Ejecutar', '&Ejecutar')
     }
