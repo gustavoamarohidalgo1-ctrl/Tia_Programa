@@ -81,7 +81,6 @@ foreach ($lnk in @($Acceso, (Join-Path $Escritorio 'Agencia de Empleos.lnk'), (J
     if (-not (Test-Path $s.TargetPath)) { Fallo "El acceso $lnk apunta a algo que no existe: $($s.TargetPath)" }
   } else { Fallo "No existe el acceso directo $lnk" }
 }
-}
 
 Paso 'Abrir desde el acceso directo del menú Inicio'
 & "$aqui\abrir_programa.ps1" -Archivo $Acceso -Proceso pythonw -Datos $Datos -Nombre 'acceso-menu-inicio' -Salida $Salida
