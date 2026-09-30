@@ -128,7 +128,10 @@ class InstaladoresProtegidos(unittest.TestCase):
                 self.assertLess(desinstalar.index("Call un.ComprobarArchivosEnUso"), desinstalar.index("RMDir /r"))
                 self.assertLess(desinstalar.index("Call un.ComprobarDatosHeredados"), desinstalar.index("RMDir /r"))
                 guardia = (proyecto / "instaladores/construccion/archivos_en_uso.nsh").read_text(encoding="utf-8")
-                self.assertIn("RmGetList", guardia)
+                # Sin Restart Manager (los antivirus lo asocian con programas dañinos y bloqueaban el instalador):
+                # el programa abierto se detecta porque Windows no deja abrir para escritura sus archivos cargados.
+                self.assertNotIn("rstrtmgr", guardia)
+                self.assertIn('FileOpen $R7 "$Origen" a', guardia)
                 reintentos = guardia.split("Function ${PREFIJO}MoverConReintentos", 1)[1].split("FunctionEnd", 1)[0]
                 self.assertIn("Sleep", reintentos)
                 self.assertIn("Function .onInstFailed", guardia)

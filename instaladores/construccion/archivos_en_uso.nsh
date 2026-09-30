@@ -1,6 +1,5 @@
-; Protecciones nativas antes de tocar archivos de una instalación.
-; Restart Manager: https://learn.microsoft.com/windows/win32/api/restartmanager/nf-restartmanager-rmgetlist
-; Sólo consulta procesos; nunca los cierra ni programa borrados tras reiniciar.
+; Protecciones antes de tocar archivos de una instalación: una sola instalación a la vez, programa cerrado,
+; datos fuera de las carpetas del programa y cambio de versión que se puede deshacer.
 ; (Este archivo se lee sin marca UTF-8: los textos que ve la persona van sin tildes.)
 !include "LogicLib.nsh"
 !include "x64.nsh"
@@ -14,6 +13,7 @@ Var Extrayendo
 Var Origen
 Var Destino
 Var Movido
+Var EnUso
 
 !define ANTERIOR "$INSTDIR\_version_anterior"   ; la versión instalada, apartada mientras se escribe la nueva
 !define FALLIDA "$INSTDIR\_version_fallida"      ; restos de una extracción que no terminó
@@ -80,62 +80,51 @@ FunctionEnd
 !insertmacro MOVER_CON_REINTENTOS ""
 
 !macro ARCHIVOS_EN_USO PREFIJO
-Function ${PREFIJO}ComprobarArchivosEnUso
-  System::Store "s"
-  StrCpy $R9 0
-  IfFileExists "$INSTDIR\runtime\pythonw.exe" comprobar
-  IfFileExists "$INSTDIR\runtime\python.exe" comprobar
-  IfFileExists "$INSTDIR\runtime\python312.dll" comprobar finalizar
-  comprobar:
-    StrCpy $R9 2
-    System::Call 'rstrtmgr::RmStartSession(*i .r0, i 0, w .r1) i .r5'
-    StrCmp $5 0 0 finalizar
-    System::Call '*(&w${NSIS_MAX_STRLEN} "$INSTDIR\runtime\pythonw.exe") p .r1'
-    System::Call '*(&w${NSIS_MAX_STRLEN} "$INSTDIR\runtime\python.exe") p .r2'
-    System::Call '*(&w${NSIS_MAX_STRLEN} "$INSTDIR\runtime\python312.dll") p .r3'
-    System::Call '*(p r1, p r2, p r3) p .r4'
-    StrCmp $1 0 liberar
-    StrCmp $2 0 liberar
-    StrCmp $3 0 liberar
-    StrCmp $4 0 liberar
-    System::Call 'rstrtmgr::RmRegisterResources(i r0, i 3, p r4, i 0, p 0, i 0, p 0) i .r5'
-    StrCmp $5 0 0 liberar
-    ; Array nulo y capacidad cero: 234 indica procesos; 0 y cantidad cero indica libre.
-    System::Call 'rstrtmgr::RmGetList(i r0, *i .r6, *i 0, p 0, *i .r8) i .r5'
-    StrCmp $5 234 ocupado
-    StrCmp $5 0 0 liberar
-    StrCmp $6 0 0 ocupado
-    StrCpy $R9 0
-    Goto liberar
+; Si el programa esta abierto, Windows no deja abrir para escritura su pythonw.exe, python.exe ni python312.dll
+; (estan cargados en memoria). Se prueba abrirlos sin cambiar nada. No se usa Restart Manager: los antivirus
+; asocian esa API con programas daninos y podian bloquear el instalador sin mostrar nada.
+Function ${PREFIJO}ProbarArchivo
+  IfFileExists "$Origen" 0 fin
+  ClearErrors
+  FileOpen $R7 "$Origen" a
+  IfErrors ocupado
+  FileClose $R7
+  Goto fin
   ocupado:
-    StrCpy $R9 1
-  liberar:
-    System::Free $4
-    System::Free $3
-    System::Free $2
-    System::Free $1
-    System::Call 'rstrtmgr::RmEndSession(i r0)'
-  finalizar:
-    Push $R9
-    System::Store "l"
-    Pop $0
-    StrCmp $0 0 libre
-    StrCmp $0 1 0 no_comprobado
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Hay una instancia de ${NOMBRE} usando los archivos de esta instalacion. Guarde su trabajo y cierrela antes de actualizar o desinstalar.$\r$\n$\r$\nNo se modificaron el programa ni sus datos." /SD IDOK
+    StrCpy $EnUso 1
+  fin:
+FunctionEnd
+
+Function ${PREFIJO}ComprobarArchivosEnUso
+  Push $R6
+  Push $R7
+  Push $Origen
+  StrCpy $R6 0
+  intentar:
+    StrCpy $EnUso 0
+    StrCpy $Origen "$INSTDIR\runtime\pythonw.exe"
+    Call ${PREFIJO}ProbarArchivo
+    StrCpy $Origen "$INSTDIR\runtime\python.exe"
+    Call ${PREFIJO}ProbarArchivo
+    StrCpy $Origen "$INSTDIR\runtime\python312.dll"
+    Call ${PREFIJO}ProbarArchivo
+    StrCmp $EnUso 0 libre
+    ; El antivirus tambien puede tenerlos abiertos un instante: se reintenta unos segundos.
+    IntOp $R6 $R6 + 1
+    IntCmp $R6 8 abierto 0 abierto
+    Sleep 500
+    Goto intentar
+  abierto:
+    Pop $Origen
+    Pop $R7
+    Pop $R6
+    MessageBox MB_OK|MB_ICONEXCLAMATION "${NOMBRE} esta abierto. Guarde su trabajo, cierre el programa y vuelva a abrir este archivo.$\r$\n$\r$\nNo se modificaron el programa ni sus datos." /SD IDOK
     SetErrorLevel 2
     Abort
-  no_comprobado:
-    !if "${PREFIJO}" == ""
-    ; Al instalar, un fallo de Restart Manager no bloquea: si el programa estuviera abierto, Windows no deja
-    ; apartar su carpeta y la instalacion se detiene sin tocar nada (ver la seccion Instalar).
-    DetailPrint "No se pudo consultar Restart Manager; se continua con la proteccion al mover carpetas."
-    Goto libre
-    !else
-    MessageBox MB_OK|MB_ICONSTOP "Windows no pudo comprobar si los archivos de ${NOMBRE} estan en uso. Cierre el programa y vuelva a intentar.$\r$\n$\r$\nNo se modificaron el programa ni sus datos." /SD IDOK
-    SetErrorLevel 2
-    Abort
-    !endif
   libre:
+  Pop $Origen
+  Pop $R7
+  Pop $R6
 FunctionEnd
 !macroend
 
