@@ -1,12 +1,28 @@
 AGENCIA DE EMPLEOS "SERVICIO EXCLUSIVO" - Programa para Windows
 ================================================================
-Version de distribucion: 1.7.1 (Windows y Mac).
+Version de distribucion: Windows 1.7.2 - Mac 1.7.1.
 
-INSTALAR (una sola vez)
+INSTALAR EN WINDOWS (recomendado, no hace falta instalar Python)
+  1. Descargue instaladores\Agencia-de-Empleos-Windows-x64.exe
+     (en GitHub: abra el archivo y pulse "Download raw file").
+  2. Doble clic en el archivo descargado. Si Edge dice que "no se descarga
+     habitualmente": "..." > "Conservar". Si aparece "Windows protegio su PC":
+     "Mas informacion" > "Ejecutar de todas formas". No pide administrador.
+  3. Siguiente > Instalar > Terminar. Queda un acceso en el Escritorio y en el
+     menu Inicio. Para actualizar, cierre el programa y repita estos pasos: sus
+     datos se conservan.
+  Si antes usaba Iniciar.bat o Agencia.exe (datos junto al programa), al abrir
+  la version instalada por primera vez se ofrece TRAER esos datos. Tambien se
+  puede hacer despues: Ctrl+Shift+B > "Traer datos de otro archivo..." y elegir
+  el archivo agencia.db de la carpeta anterior (el original no se modifica).
+  Si el programa no abre, el motivo queda en el archivo arranque.log de la
+  carpeta de datos (menu Inicio > Agencia de Empleos > Datos de la agencia).
+
+USAR DESDE EL CODIGO (alternativa, con Python instalado)
   1. Descargue Python desde https://www.python.org/downloads/
   2. Al instalar, marque la casilla "Add Python to PATH".
 
-ABRIR EL PROGRAMA
+ABRIR EL PROGRAMA DESDE EL CODIGO
   Doble clic en "Iniciar.bat". Se abre en pantalla completa.
   F11 = pantalla completa total. Esc = salir de ella.
   (Opcional) Doble clic en "Crear_EXE.bat" para crear "Agencia.exe".
@@ -37,7 +53,7 @@ SEGURIDAD DE LOS DATOS
 
 INSTALADORES (carpeta "instaladores")
   Agencia-de-Empleos-Mac-arm64.dmg      Mac con chip Apple (M1 o posterior).
-  Agencia-de-Empleos-Windows-x64.exe    Windows 10 u 11 de 64 bits.
+  Agencia-de-Empleos-Windows-x64.exe    Windows 10 u 11 de 64 bits (tambien 8.1).
   Traen todo lo necesario: no hay que instalar Python.
   El constructor Mac prefiere Python 3.12 y calcula el minimo real de macOS a
   partir de todos los binarios incluidos. El requisito aparece dentro del DMG.
@@ -111,14 +127,15 @@ AJUSTES (al inicio de agencia.py)
   PORCENTAJE_DEFECTO (por ejemplo 20 para proponer el 20% del sueldo; None = usar
   el monto) y MESES_GARANTIA (2, los meses que se proponen por defecto).
 
-ACTUALIZAR CON SEGURIDAD (VERSION 1.7.1)
+ACTUALIZAR CON SEGURIDAD (WINDOWS 1.7.2)
   Guarde su trabajo y cierre el programa antes de actualizarlo en Mac o Windows.
-  Windows comprueba si los archivos estan en uso y bloquea la actualizacion o
-  desinstalacion si encuentra una instancia abierta o no puede verificarlo.
-  Dos instaladores de la misma agencia no pueden ejecutarse a la vez.
-  Los archivos nuevos se preparan por separado antes de reemplazar la version
-  anterior. Si el reemplazo falla, se intenta recuperar esa version. Si Windows
-  tambien impide recuperarla, el mensaje indica donde quedaron los originales.
+  Windows comprueba si los archivos estan en uso y no actualiza mientras haya
+  una instancia abierta. Dos instaladores no pueden ejecutarse a la vez.
+  El instalador aparta la version instalada (reintentando si el antivirus la
+  esta revisando) y escribe la nueva en su lugar. Si algo falla, devuelve la
+  version anterior tal como estaba; una actualizacion interrumpida (corte de
+  luz) se completa o se deshace la proxima vez que se ejecute el instalador.
+  En Windows de 32 bits o anterior a 8.1 avisa y no instala nada.
   La carpeta normal de datos se conserva; al desinstalar, borrarla sigue siendo
   una opcion explicita y la respuesta predeterminada es No.
   Si hay agencia.db, contratos, respaldos, configuracion.json, borradores.json
