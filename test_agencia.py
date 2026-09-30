@@ -6,6 +6,7 @@ import struct
 import sys
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import date, datetime, timedelta
 from unittest import mock
@@ -1060,6 +1061,9 @@ class ProgramaConDatosProtegidos(unittest.TestCase):
             self.root.destroy()
         except agencia.tk.TclError:
             pass
+        for hilo in threading.enumerate():       # una copia en segundo plano todavía escribiendo en la carpeta
+            if hilo.name == "copia-de-seguridad":
+                hilo.join(timeout=60)
         for parche in reversed(self.parches):
             parche.stop()
         restablecer_areas()
@@ -1723,7 +1727,7 @@ class ProgramaConDatosProtegidos(unittest.TestCase):
         with mock.patch.object(agencia, "respaldar", lenta):
             t0 = time.perf_counter()
             self.app.hacer_copia_en_segundo_plano("auto")
-            self.assertLess(time.perf_counter() - t0, 0.1)        # la ventana sigue libre, no espera a la copia
+            self.assertLess(time.perf_counter() - t0, 0.4)        # la ventana sigue libre, no espera la copia de 0.6 s
             self.assertTrue(self.app._copiando)
             self.app.hacer_copia_en_segundo_plano("auto")          # mientras hay una en marcha, no se lanza otra
             self.esperar_copia()

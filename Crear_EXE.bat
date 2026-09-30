@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0" || goto fallar
-for %%F in (agencia.py logo.png icono.png icono.ico instaladores\construccion\version_windows.txt) do if not exist "%%F" (
+for %%F in (agencia.py logo.png icono.png icono.ico) do if not exist "%%F" (
   echo Falta %%F en la carpeta del programa.
   goto fallar
 )
@@ -18,6 +18,9 @@ if errorlevel 1 goto python_error
 :verificar_python
 "%PY%" %PY_OPCIONES% -c "import tkinter, sqlite3, venv"
 if errorlevel 1 goto python_error
+rem La version del EXE es opcional: quien copio solo los archivos del programa tambien puede crearlo.
+set "VERSION_ARG="
+if exist "%~dp0instaladores\construccion\version_windows.txt" set VERSION_ARG=--version-file "%~dp0instaladores\construccion\version_windows.txt"
 set "TRABAJO=%TEMP%\agencia-exe-%RANDOM%-%RANDOM%"
 if exist "%TRABAJO%" goto fallar
 mkdir "%TRABAJO%"
@@ -26,7 +29,7 @@ if errorlevel 1 goto fallar
 if errorlevel 1 goto fallar
 "%TRABAJO%\venv\Scripts\python.exe" -m pip install --disable-pip-version-check pyinstaller
 if errorlevel 1 goto fallar
-"%TRABAJO%\venv\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --windowed --name Agencia --icon "%~dp0icono.ico" --version-file "%~dp0instaladores\construccion\version_windows.txt" --add-data "%~dp0logo.png;." --add-data "%~dp0icono.png;." --add-data "%~dp0icono.ico;." --distpath "%TRABAJO%\dist" --workpath "%TRABAJO%\build" --specpath "%TRABAJO%" "%~dp0agencia.py"
+"%TRABAJO%\venv\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --windowed --name Agencia --icon "%~dp0icono.ico" %VERSION_ARG% --add-data "%~dp0logo.png;." --add-data "%~dp0icono.png;." --add-data "%~dp0icono.ico;." --distpath "%TRABAJO%\dist" --workpath "%TRABAJO%\build" --specpath "%TRABAJO%" "%~dp0agencia.py"
 if errorlevel 1 goto fallar
 if not exist "%TRABAJO%\dist\Agencia.exe" goto fallar
 set "NUEVO=%~dp0Agencia-nuevo-%RANDOM%-%RANDOM%.exe"

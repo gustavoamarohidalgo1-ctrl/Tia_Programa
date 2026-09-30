@@ -156,22 +156,92 @@ class RutasDeWindows(unittest.TestCase):
         self.assertEqual(agencia.contar_datos(copia)["clientes"], 1)
 
 
+class DatosDeUnaVersionAnterior(unittest.TestCase):
+    """Quien usaba Iniciar.bat o Agencia.exe tenía agencia.db junto al programa; al pasar al instalador el programa
+    abre vacío. Se buscan esos datos (solo lectura) para ofrecer traerlos."""
+
+    def setUp(self):
+        self.temporal = tempfile.TemporaryDirectory(prefix="casa-ficticia-", ignore_cleanup_errors=True)
+        self.casa = Path(self.temporal.name)
+
+    def tearDown(self):
+        self.temporal.cleanup()
+
+    def base(self, relativa, clientes=1):
+        ruta = self.casa / relativa
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        db = agencia.BaseDatos(str(ruta))
+        for i in range(clientes):
+            db.insertar("clientes", {"nombre": f"Cliente ficticio {i}"})
+        db.con.close()
+        return ruta
+
+    def test_encuentra_la_mas_reciente_con_datos_y_salta_las_carpetas_del_sistema(self):
+        vieja = self.base("Documents/Agencia vieja/agencia.db", clientes=2)
+        os.utime(vieja, (1_600_000_000, 1_600_000_000))
+        nueva = self.base("Desktop/Programa Tía/agencia.db", clientes=3)
+        self.base("Downloads/vacia/agencia.db", clientes=0)
+        self.base("AppData/Local/Agencia de Empleos/agencia.db", clientes=9)     # la del propio programa: no
+        self.base("Desktop/Programa Tía/respaldos/agencia.db", clientes=9)       # una copia: no
+        encontrada = agencia.buscar_datos_anteriores(agencia.lugares_datos_anteriores(str(self.casa)))
+        self.assertEqual(Path(encontrada["ruta"]), nueva)
+        self.assertEqual(encontrada["clientes"], 3)
+        self.assertTrue(encontrada["anterior"])
+        # la ya descartada no se vuelve a ofrecer: queda la siguiente
+        otra = agencia.buscar_datos_anteriores(agencia.lugares_datos_anteriores(str(self.casa)), excluir=[str(nueva)])
+        self.assertEqual(Path(otra["ruta"]), vieja)
+
+    def test_sin_tiempo_o_sin_datos_no_ofrece_nada(self):
+        self.base("Desktop/Agencia/agencia.db", clientes=0)
+        self.assertIsNone(agencia.buscar_datos_anteriores(agencia.lugares_datos_anteriores(str(self.casa))))
+        self.base("Desktop/Otra/agencia.db", clientes=1)
+        self.assertIsNone(agencia.buscar_datos_anteriores(agencia.lugares_datos_anteriores(str(self.casa)), limite=0))
+
+    def test_aceptar_trae_los_datos_y_rechazar_no_vuelve_a_preguntar(self):
+        anterior = self.base("Desktop/Agencia/agencia.db", clientes=2)
+        original = anterior.read_bytes()
+        copia = agencia.buscar_datos_anteriores(agencia.lugares_datos_anteriores(str(self.casa)))
+        actual = str(self.casa / "datos" / "agencia.db")
+        os.makedirs(os.path.dirname(actual))
+        db = agencia.BaseDatos(actual)
+        app = mock.Mock(db=db, root=None)
+        configuracion = str(self.casa / "datos" / "configuracion.json")
+        try:
+            with mock.patch.object(agencia, "DB_PATH", actual), mock.patch.object(agencia, "CONFIG_PATH", configuracion), \
+                    mock.patch.object(agencia.messagebox, "askyesno", return_value=False) as pregunta:
+                agencia.App.ofrecer_recuperacion(app, copia)
+                self.assertIn(str(anterior), pregunta.call_args[0][1])
+                self.assertEqual(agencia.leer_configuracion(configuracion)["datos_anteriores_descartados"], [str(anterior)])
+                self.assertEqual(db.todos("clientes"), [])
+            with mock.patch.object(agencia, "DB_PATH", actual), \
+                    mock.patch.object(agencia.messagebox, "askyesno", return_value=True), \
+                    mock.patch.object(agencia.messagebox, "showinfo"):
+                agencia.App.ofrecer_recuperacion(app, copia)
+            self.assertEqual(len(db.todos("clientes")), 2)
+            self.assertEqual(anterior.read_bytes(), original)      # el archivo original no se toca
+        finally:
+            db.con.close()
+
+
 class InstalacionDeWindows(unittest.TestCase):
     def test_sin_datos_en_la_linea_de_comandos_nunca_usa_la_carpeta_del_programa(self):
         with tempfile.TemporaryDirectory() as raiz:
             app = os.path.join(raiz, "app")
-            ejecutable = os.path.join(raiz, "runtime", "pythonw.exe")
-            with mock.patch.object(agencia, "carpeta_app", return_value=app), \
-                    mock.patch.object(agencia.sys, "executable", ejecutable):
+            os.makedirs(os.path.join(raiz, "runtime"))
+            Path(raiz, "runtime", "pythonw.exe").write_bytes(b"ficticio")
+            with mock.patch.object(agencia, "carpeta_app", return_value=app):
+                # instalada: sea cual sea el Python que la abra (el incluido o uno del sistema)
                 datos = agencia.carpeta_datos(argv=["iniciar.pyw"], entorno={"LOCALAPPDATA": "L"}, plataforma="win32")
                 self.assertEqual(datos, os.path.join("L", agencia.AGENCIA_NOMBRE))
                 # con --datos manda lo indicado
                 self.assertEqual(agencia.carpeta_datos(argv=["iniciar.pyw", "--datos", "D"], entorno={},
                                                        plataforma="win32"), "D")
-            # un Python propio (Iniciar.bat) sigue usando la carpeta del programa, como siempre
-            with mock.patch.object(agencia, "carpeta_app", return_value=app), \
-                    mock.patch.object(agencia.sys, "executable", os.path.join(raiz, "Python312", "pythonw.exe")):
-                self.assertEqual(agencia.carpeta_datos(argv=["agencia.py"], entorno={}, plataforma="win32"), app)
+                # en Mac/Linux no aplica
+                self.assertFalse(agencia.instalado_con_runtime("darwin"))
+            # una carpeta propia sin runtime (Iniciar.bat) sigue usando la carpeta del programa, como siempre
+            suelta = os.path.join(raiz, "Programa de la agencia")
+            with mock.patch.object(agencia, "carpeta_app", return_value=suelta):
+                self.assertEqual(agencia.carpeta_datos(argv=["agencia.py"], entorno={}, plataforma="win32"), suelta)
 
     @unittest.skipUnless(EN_WINDOWS, "solo Windows")
     def test_el_tcl_del_python_propio_manda_sobre_el_entorno(self):

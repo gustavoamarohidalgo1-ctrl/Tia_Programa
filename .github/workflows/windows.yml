@@ -125,9 +125,15 @@ jobs:
         shell: pwsh
         run: |
           $fallos = 0
-          foreach ($escala in '1', '1.25', '1.5') {
+          $env:AGENCIA_PRUEBA_CAPTURAS = "$env:RUNNER_TEMP\resultados\capturas"
+          # 100 % en la pantalla chica de la máquina (1024x768) y 125 % / 150 % en 1920x1080, como una portátil real
+          foreach ($prueba in @(@('1', 0, 0), @('1.25', 1920, 1080), @('1.5', 1920, 1080))) {
+            $escala, $ancho, $alto = $prueba
+            if ($ancho) {
+              ./.github/windows/resolucion.ps1 -Ancho $ancho -Alto $alto
+              if ($LASTEXITCODE -ne 0) { Write-Host "::warning::No se pudo poner ${ancho}x${alto}; se omite la escala $escala"; continue }
+            }
             $env:AGENCIA_PRUEBA_ESCALA = $escala
-            $env:AGENCIA_PRUEBA_CAPTURAS = "$env:RUNNER_TEMP\resultados\capturas"
             python .github/windows/humo.py . "$env:RUNNER_TEMP\datos-humo-$escala"
             if ($LASTEXITCODE -ne 0) { Write-Host "::error::humo.py falló con escala $escala"; $fallos++ }
           }
