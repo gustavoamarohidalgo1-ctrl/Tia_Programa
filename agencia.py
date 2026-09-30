@@ -6044,10 +6044,8 @@ def main():
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
-    try:  # identidad propia en la barra de tareas de Windows: su ícono, no el de Python
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ServicioExclusivo.AgenciaDeEmpleos")
-    except Exception:
-        pass
+    # Sin AppUserModelID propio: así Windows asocia la ventana al acceso directo con el que se abrió, y anclarla a
+    # la barra de tareas ancla ese acceso (con iniciar.pyw y --datos). El ícono sigue siendo el del programa.
     root = tk.Tk()
     root.report_callback_exception = lambda tipo, valor, traza: avisar_error(root, tipo, valor, traza)
     try:

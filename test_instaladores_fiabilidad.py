@@ -131,6 +131,13 @@ class InstaladoresProtegidos(unittest.TestCase):
                 # Sin Restart Manager (los antivirus lo asocian con programas dañinos y bloqueaban el instalador):
                 # el programa abierto se detecta porque Windows no deja abrir para escritura sus archivos cargados.
                 self.assertNotIn("rstrtmgr", guardia)
+                # Como el 1.6.3 que la tía instaló sin problemas: nada de plugins antes de la primera ventana (los
+                # antivirus miran con lupa un instalador sin firma que carga código de TEMP al arrancar).
+                inicio = guardia.split("Function ${PREFIJO}.onInit", 1)[1].split("FunctionEnd", 1)[0]
+                self.assertNotIn("System::", inicio)
+                self.assertNotIn("RunningX64", inicio)
+                self.assertNotIn("CoCreateInstance", fuente + guardia)
+                self.assertNotIn("Win\\COM.nsh", fuente)
                 self.assertIn('FileOpen $R7 "$Origen" a', guardia)
                 reintentos = guardia.split("Function ${PREFIJO}MoverConReintentos", 1)[1].split("FunctionEnd", 1)[0]
                 self.assertIn("Sleep", reintentos)

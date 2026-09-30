@@ -27,7 +27,12 @@ VIAddVersionKey /LANG=1034 "ProductName" "${NOMBRE}"
 VIAddVersionKey /LANG=1034 "FileDescription" "Instalador de ${NOMBRE}"
 VIAddVersionKey /LANG=1034 "FileVersion" "${VERSION}"
 VIAddVersionKey /LANG=1034 "ProductVersion" "${VERSION}"
-VIAddVersionKey /LANG=1034 "LegalCopyright" "${NOMBRE}"
+VIAddVersionKey /LANG=1034 "LegalCopyright" "Copyright 2026 Agencia de Empleos - Servicio Exclusivo"
+VIAddVersionKey /LANG=1034 "CompanyName" "Agencia de Empleos - Servicio Exclusivo"
+VIAddVersionKey /LANG=1034 "InternalName" "Instalador-Agencia-de-Empleos"
+VIAddVersionKey /LANG=1034 "OriginalFilename" "Agencia-de-Empleos-Windows-x64.exe"
+VIAddVersionKey /LANG=1034 "Comments" "Instala ${NOMBRE} solo para el usuario actual, sin permisos de administrador."
+VIFileVersion "${VERSION}.0"
 
 !include "MUI2.nsh"
 !include "${RAIZ}\instaladores\construccion\archivos_en_uso.nsh"
@@ -47,46 +52,6 @@ VIAddVersionKey /LANG=1034 "LegalCopyright" "${NOMBRE}"
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "Spanish"
-
-!include "Win\COM.nsh"
-!include "Win\Propkey.nsh"
-!define AUMID "ServicioExclusivo.AgenciaDeEmpleos"   ; el mismo que fija agencia.main() para su ventana
-
-; Pone al acceso directo $R0 la identidad de la ventana del programa (AppUserModelID). Así, al anclar el programa
-; abierto a la barra de tareas, Windows ancla este acceso (con iniciar.pyw y --datos) y no un pythonw.exe suelto
-; que no abriría nada, y la ventana se agrupa con el ícono anclado. Si algo falla, el acceso queda como estaba.
-Function PonerIdentidadAlAcceso
-  System::Store "s"
-  !insertmacro ComHlpr_CreateInProcInstance ${CLSID_ShellLink} ${IID_IShellLink} r0 ""
-  ${If} $0 P<> 0
-    ${IUnknown::QueryInterface} $0 '("${IID_IPersistFile}",.r1)'
-    ${If} $1 P<> 0
-      ${IPersistFile::Load} $1 '("$R0",${STGM_READWRITE}).r2'
-      ${If} $2 = 0
-        ${IUnknown::QueryInterface} $0 '("${IID_IPropertyStore}",.r3)'
-        ${If} $3 P<> 0
-          System::Call '*(&w128 "${AUMID}")p.r4'
-          System::Call '*${SYSSTRUCT_PROPERTYKEY}(${PKEY_AppUserModel_ID})p.r5'
-          System::Call '*(&i2 ${VT_LPWSTR}, &i6 0, p r4, &i4 0)p.r6'   ; PROPVARIANT de 16 bytes (instalador de 32 bits)
-          ${IPropertyStore::SetValue} $3 '($5,$6).r2'
-          ${If} $2 = 0
-            ${IPropertyStore::Commit} $3 '.r2'
-          ${EndIf}
-          System::Free $6
-          System::Free $5
-          System::Free $4
-          ${IUnknown::Release} $3 ""
-          ${If} $2 = 0
-            ${IPersistFile::Save} $1 '("$R0",1).r2'
-          ${EndIf}
-        ${EndIf}
-      ${EndIf}
-      ${IUnknown::Release} $1 ""
-    ${EndIf}
-    ${IUnknown::Release} $0 ""
-  ${EndIf}
-  System::Store "l"
-FunctionEnd
 
 Function AbrirPrograma
   SetOutPath "$INSTDIR\app"
@@ -162,10 +127,6 @@ Section "Instalar"
   CreateShortcut "$SMPROGRAMS\${NOMBRE}\Datos de la agencia.lnk" "${DATOS}"
   CreateShortcut "$SMPROGRAMS\${NOMBRE}\Desinstalar.lnk" "$INSTDIR\Desinstalar.exe"
   CreateShortcut "$DESKTOP\${NOMBRE}.lnk" "$INSTDIR\runtime\pythonw.exe" '${COMANDO_ARGUMENTOS}' "$INSTDIR\app\icono.ico" 0
-  StrCpy $R0 "$SMPROGRAMS\${NOMBRE}\${NOMBRE}.lnk"
-  Call PonerIdentidadAlAcceso
-  StrCpy $R0 "$DESKTOP\${NOMBRE}.lnk"
-  Call PonerIdentidadAlAcceso
 
   WriteRegStr HKCU "Software\${NOMBRE}" "Carpeta" "$INSTDIR"
   WriteRegStr HKCU "${CLAVE_DESINSTALAR}" "DisplayName" "${NOMBRE}"

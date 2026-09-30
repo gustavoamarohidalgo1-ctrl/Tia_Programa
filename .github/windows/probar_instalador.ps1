@@ -81,13 +81,6 @@ foreach ($lnk in @($Acceso, (Join-Path $Escritorio 'Agencia de Empleos.lnk'), (J
     if (-not (Test-Path $s.TargetPath)) { Fallo "El acceso $lnk apunta a algo que no existe: $($s.TargetPath)" }
   } else { Fallo "No existe el acceso directo $lnk" }
 }
-# Los accesos del programa llevan la identidad de su ventana: anclarlo a la barra de tareas ancla el acceso.
-$shell = New-Object -ComObject Shell.Application
-foreach ($lnk in @($Acceso, (Join-Path $Escritorio 'Agencia de Empleos.lnk'))) {
-  $item = $shell.NameSpace((Split-Path $lnk)).ParseName((Split-Path $lnk -Leaf))
-  $id = if ($item) { $item.ExtendedProperty('System.AppUserModel.ID') } else { $null }
-  Write-Host "Identidad de $(Split-Path $lnk -Leaf): $id"
-  if ($id -ne 'ServicioExclusivo.AgenciaDeEmpleos') { Fallo "El acceso $lnk no lleva la identidad del programa (tiene '$id')" }
 }
 
 Paso 'Abrir desde el acceso directo del menú Inicio'

@@ -2,7 +2,6 @@
 ; datos fuera de las carpetas del programa y cambio de versión que se puede deshacer.
 ; (Este archivo se lee sin marca UTF-8: los textos que ve la persona van sin tildes.)
 !include "LogicLib.nsh"
-!include "x64.nsh"
 !include "WinVer.nsh"
 
 Var CerrojoInstalador
@@ -20,10 +19,13 @@ Var EnUso
 
 !macro CERROJO_INSTALADOR PREFIJO
 Function ${PREFIJO}.onInit
+  ; Sin plugins antes de la primera ventana: nada se extrae a TEMP ni se carga hasta que se ve el asistente.
   !if "${PREFIJO}" == ""
-  ; El Python incluido es de 64 bits y necesita Windows 8.1 o posterior: avisar claro en vez de instalar algo
-  ; que despues no abre. Windows 11 en ARM ejecuta programas x64, asi que tambien se admite.
-  ${IfNot} ${RunningX64}
+  ; Un instalador de 32 bits en Windows de 64 bits ve PROCESSOR_ARCHITEW6432 (AMD64 o ARM64).
+  ReadEnvStr $0 PROCESSOR_ARCHITEW6432
+  ReadEnvStr $1 PROCESSOR_ARCHITECTURE
+  ${If} $0 == ""
+  ${AndIf} $1 == "x86"
     MessageBox MB_OK|MB_ICONSTOP "Este instalador es para Windows de 64 bits y este equipo tiene Windows de 32 bits.$\r$\n$\r$\nNo se modifico nada." /SD IDOK
     SetErrorLevel 5
     Abort
@@ -34,21 +36,15 @@ Function ${PREFIJO}.onInit
     Abort
   ${EndIf}
   !endif
-  ; Evita que dos actualizadores/desinstaladores de la misma marca publiquen a la vez.
-  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\Instalador.${NOMBRE}") p .r0 ?e'
-  Pop $1
-  StrCpy $CerrojoInstalador $0
-  StrCmp $0 0 bloqueo_error
-  StrCmp $1 183 bloqueo_ocupado
-  Return
-  bloqueo_ocupado:
+  ; Cerrojo sin plugins: FileOpen comparte el archivo solo para lectura; otro instalador o desinstalador no
+  ; puede abrirlo para escribir mientras este siga abierto. Windows lo suelta al cerrarse el proceso.
+  ClearErrors
+  FileOpen $CerrojoInstalador "$TEMP\Instalador.${NOMBRE}.lock" a
+  ${If} ${Errors}
     MessageBox MB_OK|MB_ICONEXCLAMATION "Ya hay un instalador o desinstalador de ${NOMBRE} abierto. Cierrelo antes de continuar." /SD IDOK
     SetErrorLevel 2
     Abort
-  bloqueo_error:
-    MessageBox MB_OK|MB_ICONSTOP "No se pudo comprobar otra instalacion en curso. No se modificaron los archivos." /SD IDOK
-    SetErrorLevel 2
-    Abort
+  ${EndIf}
 FunctionEnd
 !macroend
 
