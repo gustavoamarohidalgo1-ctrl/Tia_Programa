@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Salida | Out-Null
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
 $A = [System.Windows.Automation.AutomationElement]
-$T = [System.Windows.Automation.TreeScope]
+$Alcance = [System.Windows.Automation.TreeScope]
 function Captura($n) {
   try {
     $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -24,7 +24,7 @@ function Captura($n) {
 }
 function Pulsar($ventana, [string[]]$nombres) {
   foreach ($n in $nombres) {
-    $e = $ventana.FindFirst($T::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, $n)))
+    $e = $ventana.FindFirst($Alcance::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, $n)))
     if ($e) {
       try { $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return "invocado '$n'" }
       catch {
@@ -48,7 +48,7 @@ $proceso = [IO.Path]::GetFileNameWithoutExtension($archivo)
 
 # 2) Doble clic: el Explorador lo abre (pasan los controles de Windows para archivos descargados)
 $antes = @{}
-foreach ($v in $A::RootElement.FindAll($T::Children, [System.Windows.Automation.Condition]::TrueCondition)) { $antes[$v.Current.NativeWindowHandle] = 1 }
+foreach ($v in $A::RootElement.FindAll($Alcance::Children, [System.Windows.Automation.Condition]::TrueCondition)) { $antes[$v.Current.NativeWindowHandle] = 1 }
 $inicio = Get-Date
 Start-Process -FilePath explorer.exe -ArgumentList "`"$archivo`""
 $eventos = New-Object System.Collections.Generic.List[string]
@@ -60,7 +60,7 @@ while (((Get-Date) - $inicio).TotalSeconds -lt $Espera) {
   Start-Sleep -Milliseconds 1200
   $t = [int]((Get-Date) - $inicio).TotalSeconds
   if ($momentos -and $t -ge $momentos[0]) { Captura "t$($momentos[0])s"; $momentos = @($momentos | Select-Object -Skip 1) }
-  foreach ($v in $A::RootElement.FindAll($T::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+  foreach ($v in $A::RootElement.FindAll($Alcance::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
     $h = $v.Current.NativeWindowHandle
     if ($antes.ContainsKey($h)) { continue }
     $pn = try { (Get-Process -Id $v.Current.ProcessId -ErrorAction Stop).ProcessName } catch { '?' }

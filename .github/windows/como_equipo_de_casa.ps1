@@ -7,6 +7,7 @@ Set-MpPreference -MAPSReporting Advanced -SubmitSamplesConsent SendSafeSamples -
                  -CloudBlockLevel Default -CloudExtendedTimeout 0 -PUAProtection Enabled
 $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
 & $mp -ValidateMapsConnection 2>&1 | Select-Object -Last 3 | Write-Host
+$nube = $LASTEXITCODE
 Get-MpPreference | Format-List MAPSReporting, SubmitSamplesConsent, DisableBlockAtFirstSeen, CloudBlockLevel, PUAProtection,
                                 DisableRealtimeMonitoring, DisableBehaviorMonitoring, DisableIOAVProtection | Out-String | Write-Host
 
@@ -17,3 +18,6 @@ Set-ItemProperty -Path $pol -Name EnableSmartScreen -Type DWord -Value 1
 Set-ItemProperty -Path $pol -Name ShellSmartScreenLevel -Type String -Value 'Warn'
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' -Name SmartScreenEnabled -Type String -Value 'Warn'
 Write-Host 'SmartScreen para programas: Warn'
+$estado = Get-MpComputerStatus
+Write-Host "Nube de Defender (MAPS): $(if ($nube -eq 0) { 'conectada' } else { 'sin conexion en esta maquina' }); tiempo real: $($estado.RealTimeProtectionEnabled)"
+exit 0

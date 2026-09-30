@@ -154,6 +154,19 @@ if (Test-Path $mp) {
 } else { Write-Host 'Defender no está disponible en esta imagen.' }
 
 if (-not $SinDesinstalar) {
+  Paso 'Desinstalar con el programa abierto (debe negarse)'
+  $abierto = Start-Process -FilePath "$Instdir\runtime\pythonw.exe" -ArgumentList $s.Arguments -WorkingDirectory "$Instdir\app" -PassThru
+  $limite = (Get-Date).AddSeconds(60)
+  do { Start-Sleep -Milliseconds 500; $abierto.Refresh() } until ($abierto.MainWindowTitle -like '*Agencia*' -or $abierto.HasExited -or (Get-Date) -gt $limite)
+  $p = Start-Process -FilePath "$Instdir\Desinstalar.exe" -ArgumentList '/S', "_?=$Instdir" -Wait -PassThru
+  Write-Host "Desinstalar con el programa abierto -> código $($p.ExitCode)"
+  if ($p.ExitCode -ne 2) { Fallo "Con el programa abierto el desinstalador debía negarse con código 2 y devolvió $($p.ExitCode)" }
+  if (-not (Test-Path "$Instdir\runtime\pythonw.exe")) { Fallo 'El desinstalador borró archivos con el programa abierto' }
+  $abierto.Refresh()
+  [void]$abierto.CloseMainWindow()
+  if (-not $abierto.WaitForExit(30000)) { Stop-Process -Id $abierto.Id -Force -ErrorAction SilentlyContinue; Fallo 'No se cerró el programa abierto con la X' }
+  Start-Sleep -Seconds 2
+
   Paso 'Desinstalar (en silencio conserva los datos)'
   $p = Start-Process -FilePath "$Instdir\Desinstalar.exe" -ArgumentList '/S', "_?=$Instdir" -Wait -PassThru
   Write-Host "Desinstalador -> código $($p.ExitCode)"
