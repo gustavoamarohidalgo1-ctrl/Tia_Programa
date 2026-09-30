@@ -284,7 +284,11 @@ class ConservacionFinalTest(unittest.TestCase):
                     agencia.restaurar_archivo(str(self.ruta), str(destino))
         self.assertEqual(self.ruta.read_bytes(), original)
         self.assertEqual(alias.read_bytes(), original)
-        alias.unlink()  # SQLite 3.54 no permite consultar una base con más de un enlace físico.
+        # SQLite 3.54 no permite consultar una base con más de un enlace físico, y Windows no borra un enlace
+        # de un archivo abierto: se cierra, se borra el alias y se reabre.
+        self.db.con.close()
+        alias.unlink()
+        self.db = agencia.BaseDatos(str(self.ruta))
 
     def test_backup_sqlite_ocupado_tiene_espera_limitada(self):
         bloqueo = sqlite3.connect(self.ruta)
@@ -326,7 +330,7 @@ class ConservacionFinalTest(unittest.TestCase):
         ventana = Mock()
         with patch.object(agencia, "CARPETA", str(ruta)), patch.object(agencia.tk, "Tk", return_value=ventana), \
                 patch.object(agencia, "reabrir_con_tk_moderno"), patch.object(agencia, "avisar_error") as aviso, \
-                patch.object(agencia, "App") as app:
+                patch.object(agencia, "App") as app, patch.dict(sys.modules, {"ctypes": Mock()}):
             agencia.main()
         aviso.assert_called_once()
         app.assert_not_called()

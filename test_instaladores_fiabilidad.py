@@ -50,8 +50,8 @@ class InstaladoresProtegidos(unittest.TestCase):
                 cadenas = {n.args[0].value: n.args[1].value for n in ast.walk(metadata)
                            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "StringStruct"}
                 self.assertEqual(cadenas["ProductName"], marca)
-                self.assertEqual(cadenas["ProductVersion"], "1.7.1")
-                self.assertEqual(cadenas["FileVersion"], "1.7.1")
+                self.assertEqual(cadenas["ProductVersion"], "1.7.2")
+                self.assertEqual(cadenas["FileVersion"], "1.7.2")
                 bat = (proyecto / "Crear_EXE.bat").read_bytes()
                 self.assertEqual(bat.count(b"\n"), bat.count(b"\r\n"))
                 texto = bat.decode("ascii")
@@ -97,7 +97,7 @@ class InstaladoresProtegidos(unittest.TestCase):
                 salida = temporal / "fixture.exe"
                 compilacion = subprocess.run([
                     compilador, "-V3", f"-DRAIZ={proyecto}", f"-DAPLICACION={app}",
-                    f"-DRUNTIME={runtime}", "-DVERSION=1.7.1", f"-DSALIDA={salida}",
+                    f"-DRUNTIME={runtime}", "-DVERSION=1.7.2", f"-DSALIDA={salida}",
                     f"-DICONO={icono}", str(guion)], capture_output=True, text=True,
                     env={**os.environ, "LC_ALL": "en_US.UTF-8"}, timeout=30)
                 self.assertEqual(compilacion.returncode, 0, compilacion.stdout + compilacion.stderr)
@@ -113,13 +113,25 @@ class InstaladoresProtegidos(unittest.TestCase):
                 self.assertNotIn('RMDir /r "$INSTDIR\\runtime"', instalar)
                 self.assertNotIn('RMDir /r "$INSTDIR\\app"', instalar)
                 self.assertLess(instalar.index("Call ComprobarArchivosEnUso"), instalar.index("File /r"))
-                self.assertIn('Rename "$INSTDIR\\runtime" "$Actualizacion\\runtime-anterior"', instalar)
-                self.assertIn('IfErrors recuperar_anterior', instalar)
+                self.assertLess(instalar.index("Call ComprobarDatosHeredados"), instalar.index("File /r"))
+                # La versión anterior se aparta (con reintentos) antes de escribir la nueva...
+                apartar = instalar.index('StrCpy $Destino "${ANTERIOR}\\runtime"')
+                self.assertLess(apartar, instalar.index("File /r"))
+                self.assertIn("Call MoverConReintentos", instalar[apartar:apartar + 120])
+                self.assertIn("StrCmp $Movido 1 0 no_se_pudo_apartar", instalar)
+                # ...y la nueva se escribe en su lugar: nunca se mueve un árbol recién extraído (el antivirus lo retiene).
+                self.assertNotIn("Rename", instalar)
+                self.assertIn('SetOutPath "$INSTDIR\\runtime"', instalar)
+                self.assertIn("Goto extraccion_incompleta", instalar)
+                self.assertIn("Call RestaurarVersionAnterior", instalar.split("no_se_pudo_apartar:", 1)[1])
                 desinstalar = fuente.split('Section "Uninstall"', 1)[1]
                 self.assertLess(desinstalar.index("Call un.ComprobarArchivosEnUso"), desinstalar.index("RMDir /r"))
                 self.assertLess(desinstalar.index("Call un.ComprobarDatosHeredados"), desinstalar.index("RMDir /r"))
                 guardia = (proyecto / "instaladores/construccion/archivos_en_uso.nsh").read_text(encoding="utf-8")
                 self.assertIn("RmGetList", guardia)
+                reintentos = guardia.split("Function ${PREFIJO}MoverConReintentos", 1)[1].split("FunctionEnd", 1)[0]
+                self.assertIn("Sleep", reintentos)
+                self.assertIn("Function .onInstFailed", guardia)
                 self.assertNotIn("RmShutdown", guardia)
                 for recurso in ("agencia.db", "contratos", "respaldos", "configuracion.json", "borradores.json", "errores.log"):
                     self.assertIn(recurso, guardia)

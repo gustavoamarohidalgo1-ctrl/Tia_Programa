@@ -644,7 +644,7 @@ class CarpetaDeDatos(unittest.TestCase):
                     self.assertEqual(self.datos(plataforma="win32", entorno={"LOCALAPPDATA": "C:\\L"}),
                                      os.path.join("C:\\L", agencia.AGENCIA_NOMBRE))
                     self.assertEqual(self.datos(plataforma="linux"),
-                                     os.path.join("/Users/ana/.local/share", agencia.AGENCIA_NOMBRE))
+                                     os.path.join("/Users/ana", ".local", "share", agencia.AGENCIA_NOMBRE))
                     Path(vacia, "agencia.db").write_bytes(b"")   # datos de una instalación antigua junto al .exe
                     self.assertEqual(self.datos(plataforma="win32"), vacia)
                 finally:
@@ -1001,7 +1001,8 @@ class MesesDeGarantiaVariables(unittest.TestCase):
         with tempfile.TemporaryDirectory() as carpeta, \
                 mock.patch.object(agencia, "DB_PATH", str(Path(carpeta) / "agencia.db")), \
                 mock.patch.object(agencia, "CARPETA_RESPALDOS", str(Path(carpeta) / "r")), \
-                mock.patch.object(agencia, "carpetas_externas", lambda config=None: []):
+                mock.patch.object(agencia, "carpetas_externas", lambda config=None: []), \
+                mock.patch.object(agencia, "maximizar", lambda root: None):
             try:
                 app = agencia.App(root)
                 pagina = app.garantias
@@ -1034,6 +1035,7 @@ class ProgramaConDatosProtegidos(unittest.TestCase):
             mock.patch.object(agencia, "CARPETA_RESPALDOS", self.respaldos),
             mock.patch.object(agencia, "CONFIG_PATH", str(base / "configuracion.json")),
             mock.patch.object(agencia, "carpetas_externas", lambda config=None: [self.externa]),
+            mock.patch.object(agencia, "maximizar", lambda root: None),     # en Windows mostraría la ventana oculta
             mock.patch.object(agencia.tk.Toplevel, "grab_set", lambda self: None)]
         for parche in self.parches:
             parche.start()
@@ -1051,14 +1053,16 @@ class ProgramaConDatosProtegidos(unittest.TestCase):
         self.clientes = self.app.clientes
 
     def tearDown(self):
-        for parche in reversed(self.parches):
-            parche.stop()
-        restablecer_areas()
+        # Primero se cierra la ventana (con los parches aún puestos): una copia programada que se disparara al
+        # quitarlos usaría las rutas reales y un aviso real que dejaría la prueba esperando.
         try:
             self.root.update()      # deja terminar las tareas pendientes antes de destruir la ventana
             self.root.destroy()
         except agencia.tk.TclError:
             pass
+        for parche in reversed(self.parches):
+            parche.stop()
+        restablecer_areas()
         self.temporal.cleanup()
 
     def escribir_cliente(self, nombre="Ana", telefono="999"):

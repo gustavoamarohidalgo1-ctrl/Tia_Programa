@@ -11,7 +11,7 @@ AQUI="$RAIZ/instaladores/construccion"
 SALIDA="$RAIZ/instaladores/Agencia-de-Empleos-Windows-x64.exe"
 TRABAJO="$(mktemp -d "${TMPDIR:-/tmp}/agencia-instalador-windows.XXXXXX")"
 CACHE="${TMPDIR:-/tmp}/agencia-instalador-descargas"
-VERSION="${VERSION:-1.7.1}"
+VERSION="${VERSION:-1.7.2}"
 trap 'codigo=$?; if [ "$codigo" -eq 0 ]; then rm -rf "$TRABAJO"; else echo "Construccion fallida. Archivos conservados en: $TRABAJO" >&2; fi' EXIT
 PYVER="3.12.10"     # ultima 3.12 con binarios para Windows
 

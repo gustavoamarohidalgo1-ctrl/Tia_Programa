@@ -1,18 +1,22 @@
 ; Protecciones nativas antes de tocar archivos de una instalación.
 ; Restart Manager: https://learn.microsoft.com/windows/win32/api/restartmanager/nf-restartmanager-rmgetlist
 ; Sólo consulta procesos; nunca los cierra ni programa borrados tras reiniciar.
+; (Este archivo se lee sin marca UTF-8: los textos que ve la persona van sin tildes.)
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !include "WinVer.nsh"
 
 Var CerrojoInstalador
-Var Actualizacion
 Var RuntimeAnterior
 Var AppAnterior
 Var DesinstaladorAnterior
-Var RuntimePublicado
-Var AppPublicado
-Var DesinstaladorPublicado
+Var Extrayendo
+Var Origen
+Var Destino
+Var Movido
+
+!define ANTERIOR "$INSTDIR\_version_anterior"   ; la versión instalada, apartada mientras se escribe la nueva
+!define FALLIDA "$INSTDIR\_version_fallida"      ; restos de una extracción que no terminó
 
 !macro CERROJO_INSTALADOR PREFIJO
 Function ${PREFIJO}.onInit
@@ -51,6 +55,30 @@ FunctionEnd
 !insertmacro CERROJO_INSTALADOR ""
 !insertmacro CERROJO_INSTALADOR "un"
 
+!macro MOVER_CON_REINTENTOS PREFIJO
+; Mueve $Origen a $Destino. El antivirus o el indexador de Windows abren los archivos unos instantes y en ese
+; momento Windows rechaza el cambio de nombre: se reintenta durante unos 20 segundos. $Movido = 1 si se logro.
+Function ${PREFIJO}MoverConReintentos
+  Push $R8
+  StrCpy $Movido 0
+  StrCpy $R8 0
+  reintentar:
+    ClearErrors
+    Rename "$Origen" "$Destino"
+    IfErrors 0 movido
+    IntOp $R8 $R8 + 1
+    IntCmp $R8 80 terminar 0 terminar
+    Sleep 250
+    Goto reintentar
+  movido:
+    StrCpy $Movido 1
+  terminar:
+  Pop $R8
+FunctionEnd
+!macroend
+
+!insertmacro MOVER_CON_REINTENTOS ""
+
 !macro ARCHIVOS_EN_USO PREFIJO
 Function ${PREFIJO}ComprobarArchivosEnUso
   System::Store "s"
@@ -73,7 +101,7 @@ Function ${PREFIJO}ComprobarArchivosEnUso
     System::Call 'rstrtmgr::RmRegisterResources(i r0, i 3, p r4, i 0, p 0, i 0, p 0) i .r5'
     StrCmp $5 0 0 liberar
     ; Array nulo y capacidad cero: 234 indica procesos; 0 y cantidad cero indica libre.
-    System::Call 'rstrtmgr::RmGetList(i r0, *i .r6, *i 0 .r7, p 0, *i .r8) i .r5'
+    System::Call 'rstrtmgr::RmGetList(i r0, *i .r6, *i 0, p 0, *i .r8) i .r5'
     StrCmp $5 234 ocupado
     StrCmp $5 0 0 liberar
     StrCmp $6 0 0 ocupado
@@ -97,9 +125,16 @@ Function ${PREFIJO}ComprobarArchivosEnUso
     SetErrorLevel 2
     Abort
   no_comprobado:
+    !if "${PREFIJO}" == ""
+    ; Al instalar, un fallo de Restart Manager no bloquea: si el programa estuviera abierto, Windows no deja
+    ; apartar su carpeta y la instalacion se detiene sin tocar nada (ver la seccion Instalar).
+    DetailPrint "No se pudo consultar Restart Manager; se continua con la proteccion al mover carpetas."
+    Goto libre
+    !else
     MessageBox MB_OK|MB_ICONSTOP "Windows no pudo comprobar si los archivos de ${NOMBRE} estan en uso. Cierre el programa y vuelva a intentar.$\r$\n$\r$\nNo se modificaron el programa ni sus datos." /SD IDOK
     SetErrorLevel 2
     Abort
+    !endif
   libre:
 FunctionEnd
 !macroend
@@ -123,7 +158,7 @@ Function ${PREFIJO}ComprobarDatosHeredados
   IfFileExists "$INSTDIR\runtime\errores.log" datos_dentro
   Return
   datos_dentro:
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Esta instalacion contiene datos dentro de app o runtime (base, contratos, respaldos o archivos personales). No se reemplazaron ni borraron.$\r$\n$\r$\nConserve una copia y cambie su ubicacion antes de actualizar o desinstalar ${NOMBRE}." /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Esta instalacion contiene datos dentro de app o runtime (base, contratos, respaldos o archivos personales). No se reemplazaron ni borraron.$\r$\n$\r$\nCopie esa carpeta a un lugar seguro, abra el programa desde ella para hacer un respaldo y restaurelo en la instalacion nueva:$\r$\n$INSTDIR" /SD IDOK
     SetErrorLevel 4
     Abort
 FunctionEnd
@@ -132,13 +167,99 @@ FunctionEnd
 !insertmacro DATOS_HEREDADOS ""
 !insertmacro DATOS_HEREDADOS "un."
 
-Function .onInstFailed
-  ; Sólo limpiar nuestro staging si no quedan originales pendientes de recuperar.
-  StrCmp $Actualizacion "" conservar_staging
-  IfFileExists "$Actualizacion\runtime-anterior\*.*" conservar_staging
-  IfFileExists "$Actualizacion\app-anterior\*.*" conservar_staging
-  IfFileExists "$Actualizacion\Desinstalar-anterior.exe" conservar_staging
+; Devuelve a su lugar la version apartada en ${ANTERIOR}: primero aparta lo nuevo que haya quedado a medias.
+; $0 = 1 si todo quedo como antes.
+Function RestaurarVersionAnterior
+  StrCpy $0 1
   SetOutPath "$INSTDIR"
-  RMDir /r "$Actualizacion"
-  conservar_staging:
+  RMDir /r "${FALLIDA}"
+  CreateDirectory "${FALLIDA}"
+  ${If} $RuntimeAnterior == 1
+    ${If} ${FileExists} "$INSTDIR\runtime\*.*"
+      StrCpy $Origen "$INSTDIR\runtime"
+      StrCpy $Destino "${FALLIDA}\runtime"
+      Call MoverConReintentos
+    ${EndIf}
+    StrCpy $Origen "${ANTERIOR}\runtime"
+    StrCpy $Destino "$INSTDIR\runtime"
+    Call MoverConReintentos
+    ${If} $Movido != 1
+      StrCpy $0 0
+    ${EndIf}
+  ${EndIf}
+  ${If} $AppAnterior == 1
+    ${If} ${FileExists} "$INSTDIR\app\*.*"
+      StrCpy $Origen "$INSTDIR\app"
+      StrCpy $Destino "${FALLIDA}\app"
+      Call MoverConReintentos
+    ${EndIf}
+    StrCpy $Origen "${ANTERIOR}\app"
+    StrCpy $Destino "$INSTDIR\app"
+    Call MoverConReintentos
+    ${If} $Movido != 1
+      StrCpy $0 0
+    ${EndIf}
+  ${EndIf}
+  ${If} $DesinstaladorAnterior == 1
+    Delete "$INSTDIR\Desinstalar.exe"
+    StrCpy $Origen "${ANTERIOR}\Desinstalar.exe"
+    StrCpy $Destino "$INSTDIR\Desinstalar.exe"
+    Call MoverConReintentos
+  ${EndIf}
+  RMDir /r "${FALLIDA}"
+  ${If} $0 == 1
+    RMDir /r "${ANTERIOR}"
+  ${EndIf}
+FunctionEnd
+
+; Una actualizacion anterior interrumpida (corte de luz, equipo apagado...) puede haber dejado la version previa
+; apartada. Si falta la pieza en su lugar se devuelve; lo que sobre se limpia. Tambien limpia las carpetas
+; temporales nsXXXX.tmp que dejaba la version 1.7.1.
+Function RecuperarInstalacionInterrumpida
+  SetOutPath "$INSTDIR"
+  ${If} ${FileExists} "${ANTERIOR}\runtime\*.*"
+  ${AndIfNot} ${FileExists} "$INSTDIR\runtime\pythonw.exe"
+    RMDir /r "$INSTDIR\runtime"
+    StrCpy $Origen "${ANTERIOR}\runtime"
+    StrCpy $Destino "$INSTDIR\runtime"
+    Call MoverConReintentos
+  ${EndIf}
+  ${If} ${FileExists} "${ANTERIOR}\app\*.*"
+  ${AndIfNot} ${FileExists} "$INSTDIR\app\agencia.py"
+    RMDir /r "$INSTDIR\app"
+    StrCpy $Origen "${ANTERIOR}\app"
+    StrCpy $Destino "$INSTDIR\app"
+    Call MoverConReintentos
+  ${EndIf}
+  RMDir /r "${ANTERIOR}"
+  RMDir /r "${FALLIDA}"
+  FindFirst $R0 $R1 "$INSTDIR\ns*.tmp"
+  ${DoWhile} $R1 != ""
+    ${If} ${FileExists} "$INSTDIR\$R1\*.*"
+      ${If} ${FileExists} "$INSTDIR\$R1\runtime-anterior\*.*"
+      ${AndIfNot} ${FileExists} "$INSTDIR\runtime\pythonw.exe"
+        RMDir /r "$INSTDIR\runtime"
+        StrCpy $Origen "$INSTDIR\$R1\runtime-anterior"
+        StrCpy $Destino "$INSTDIR\runtime"
+        Call MoverConReintentos
+      ${EndIf}
+      ${If} ${FileExists} "$INSTDIR\$R1\app-anterior\*.*"
+      ${AndIfNot} ${FileExists} "$INSTDIR\app\agencia.py"
+        RMDir /r "$INSTDIR\app"
+        StrCpy $Origen "$INSTDIR\$R1\app-anterior"
+        StrCpy $Destino "$INSTDIR\app"
+        Call MoverConReintentos
+      ${EndIf}
+      RMDir /r "$INSTDIR\$R1"
+    ${EndIf}
+    FindNext $R0 $R1
+  ${Loop}
+  FindClose $R0
+FunctionEnd
+
+Function .onInstFailed
+  ; La instalacion se detuvo mientras escribia la version nueva: volver a dejar la anterior como estaba.
+  ${If} $Extrayendo == 1
+    Call RestaurarVersionAnterior
+  ${EndIf}
 FunctionEnd

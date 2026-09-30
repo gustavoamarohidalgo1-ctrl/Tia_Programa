@@ -24,9 +24,11 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 if sys.platform == "win32":  # Python incluido en el instalador: indicar dónde están los archivos de Tcl/Tk
-    for _variable, _carpeta in (("TCL_LIBRARY", "tcl8.6"), ("TK_LIBRARY", "tk8.6")):
+    # Siempre los propios: si otro programa dejó TCL_LIBRARY en el entorno de Windows, apuntaría a otra
+    # versión de Tcl y la ventana no podría abrirse («version conflict for package Tcl»).
+    for _variable, _carpeta, _archivo in (("TCL_LIBRARY", "tcl8.6", "init.tcl"), ("TK_LIBRARY", "tk8.6", "tk.tcl")):
         _ruta = os.path.join(sys.base_prefix, "tcl", _carpeta)
-        if _variable not in os.environ and os.path.isdir(_ruta):
+        if os.path.isfile(os.path.join(_ruta, _archivo)):
             os.environ[_variable] = _ruta
 
 try:
@@ -65,6 +67,17 @@ def carpeta_app():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def instalado_con_runtime(plataforma=None):
+    """True si corre con el Python que trae el instalador de Windows (carpeta runtime junto a la carpeta app)."""
+    plataforma = sys.platform if plataforma is None else plataforma
+    if not plataforma.startswith("win"):
+        return False
+    runtime = os.path.dirname(os.path.abspath(sys.executable))
+    raiz = os.path.dirname(runtime)
+    return (os.path.basename(runtime).lower() == "runtime"
+            and os.path.normcase(os.path.join(raiz, "app")) == os.path.normcase(carpeta_app()))
+
+
 def carpeta_datos(argv=None, entorno=None, plataforma=None, casa=None):
     """Dónde se guardan la base, los contratos, los respaldos y el registro de errores.
 
@@ -79,6 +92,10 @@ def carpeta_datos(argv=None, entorno=None, plataforma=None, casa=None):
         return argv[argv.index("--datos") + 1]
     if entorno.get("AGENCIA_DATOS"):
         return entorno["AGENCIA_DATOS"]
+    if not getattr(sys, "frozen", False) and instalado_con_runtime(plataforma):
+        # Instalación de Windows abierta sin --datos (p. ej. doble clic en app\iniciar.pyw): los datos van a la
+        # carpeta del usuario, como con el acceso directo, y nunca dentro de la carpeta del programa.
+        return os.path.join(entorno.get("LOCALAPPDATA") or os.path.join(casa, "AppData", "Local"), AGENCIA_NOMBRE)
     if getattr(sys, "frozen", False):
         junto_al_programa = os.path.dirname(sys.executable)
         if os.path.exists(os.path.join(junto_al_programa, "agencia.db")):   # instalación antigua: datos junto al .exe
@@ -795,7 +812,7 @@ class BaseDatos:
             if resguardo is not None:
                 resguardo.close()
             if temporal is not None and not conservar_resguardo:
-                shutil.rmtree(temporal)
+                shutil.rmtree(temporal, ignore_errors=True)   # en Windows un antivirus puede retenerlo un momento
         self._version_externa = self._leer_version_externa()
         self._olvidar_memoria()
         self._cambio_desconocido()
@@ -1261,7 +1278,40 @@ def partir_etiqueta(texto):
     return texto, ""
 
 
+def escala_pantalla(widget):
+    """Escala de pantalla de Windows: 1.25 con «125 %», 1.5 con «150 %»... (1 en Mac y Linux).
+
+    El programa pide a Windows texto nítido (SetProcessDpiAwareness), así que las letras crecen con la escala
+    de la pantalla; los tamaños fijos de las ventanas, pensados para 96 ppp, se multiplican por este factor
+    para que el contenido y sus botones sigan cabiendo."""
+    if not ES_WINDOWS:
+        return 1.0
+    try:
+        return max(1.0, float(widget.winfo_fpixels("1i")) / 96.0)
+    except (tk.TclError, ValueError):
+        return 1.0
+
+
+def _crecer_si_falta(ventana, ancho, alto):
+    """Si el contenido de una ventana pide más espacio que el previsto, se agranda (sin salir de la pantalla)."""
+    try:
+        if not ventana.winfo_exists():
+            return
+        ventana.update_idletasks()
+        nuevo_ancho = min(max(ancho, ventana.winfo_reqwidth()), ventana.winfo_screenwidth())
+        nuevo_alto = min(max(alto, ventana.winfo_reqheight()), ventana.winfo_screenheight() - 40)
+        if (nuevo_ancho, nuevo_alto) != (ancho, alto):
+            ventana.geometry(f"{nuevo_ancho}x{nuevo_alto}")
+    except tk.TclError:
+        pass
+
+
 def centrar(ventana, ancho, alto, sobre=None):
+    factor = escala_pantalla(ventana)
+    ancho = min(round(ancho * factor), ventana.winfo_screenwidth())
+    alto = min(round(alto * factor), ventana.winfo_screenheight() - 40)
+    if ES_WINDOWS and isinstance(ventana, tk.Toplevel):
+        ventana.after_idle(lambda: _crecer_si_falta(ventana, ancho, alto))
     if sobre is not None:
         x = sobre.winfo_rootx() + (sobre.winfo_width() - ancho) // 2
         y = sobre.winfo_rooty() + (sobre.winfo_height() - alto) // 3
@@ -1281,12 +1331,13 @@ def pedir_texto(parent, titulo, pregunta, valor_inicial=""):
     centrar(ventana, 480, 230, parent.winfo_toplevel())
     contenido = ttk.Frame(ventana, padding=(26, 24, 26, 22))
     contenido.pack(fill="both", expand=True)
-    ttk.Label(contenido, text=pregunta, wraplength=420, justify="left").pack(anchor="w")
+    etiqueta = ttk.Label(contenido, text=pregunta, wraplength=round(420 * escala_pantalla(ventana)), justify="left")
+    etiqueta.pack(anchor="w")
     valor = tk.StringVar(value=valor_inicial or "")
     entrada = ttk.Entry(contenido, textvariable=valor)
     entrada.pack(fill="x", pady=(16, 0))
     botones = ttk.Frame(contenido)
-    botones.pack(side="bottom", fill="x")
+    botones.pack(side="bottom", fill="x", before=etiqueta)   # los botones se reservan primero: nunca quedan cortados
     resultado = [None]
 
     def aceptar(_evento=None):
@@ -2847,7 +2898,7 @@ class DialogoFirmas(tk.Toplevel):
         for panel in self.paneles.values():
             panel.pack(side="left", expand=True)
         botones = ttk.Frame(cont)
-        botones.pack(side="bottom", fill="x")
+        botones.pack(side="bottom", fill="x", before=fila)   # si falta espacio se achican los recuadros, no los botones
         ttk.Button(botones, text="Guardar firmas", style="Primario.TButton",
                    command=self.guardar).pack(side="right")
         ttk.Button(botones, text="Cancelar", style="Secundario.TButton",
@@ -3289,7 +3340,9 @@ class DialogoAreas(tk.Toplevel):
                                                ("trab", "Trabajadoras", 130)])
         marco.pack(fill="both", expand=True)
         pie = ttk.Frame(cont)
-        pie.pack(fill="x", pady=(14, 0))
+        # Antes que la lista en el orden de empaque: con poco espacio (pantalla chica o escala 125-150 %) se
+        # achica la lista y los botones de abajo siguen visibles.
+        pie.pack(side="bottom", fill="x", pady=(14, 0), before=marco)
         ttk.Button(pie, text="Cerrar", style="Secundario.TButton", command=self.destroy).pack(side="right")
         ttk.Button(pie, text="Eliminar el área elegida", style="Peligro.TButton",
                    command=self.eliminar).pack(side="right", padx=8)
@@ -3563,10 +3616,21 @@ class PaginaEnlaces(ttk.Frame):
             return
         os.makedirs(CARPETA_CONTRATOS, exist_ok=True)
         ruta = Path(CARPETA_CONTRATOS) / f"contrato_{c['id']}.html"
-        with archivo_atomico(ruta) as archivo:
-            archivo.write(html_contrato(c, cli or {}, t or {}, imprimir=True))
-        import webbrowser
-        webbrowser.open(ruta.as_uri())
+        documento = html_contrato(c, cli or {}, t or {}, imprimir=True)
+        try:
+            with archivo_atomico(ruta) as archivo:
+                archivo.write(documento)
+        except PermissionError:
+            # En Windows no se puede reemplazar un archivo abierto en otro programa (Word, el navegador...):
+            # se imprime una copia con otro nombre en vez de fallar.
+            ruta = ruta.with_name(f"contrato_{c['id']}_{datetime.now():%Y%m%d-%H%M%S}.html")
+            with archivo_atomico(ruta) as archivo:
+                archivo.write(documento)
+        if ES_WINDOWS:
+            os.startfile(str(ruta))    # el programa predeterminado para .html, sin pasar por una URL file://
+        else:
+            import webbrowser
+            webbrowser.open(ruta.as_uri())
 
 
 class AccionRechazada(ValueError):
@@ -4285,7 +4349,9 @@ class DialogoCopias(tk.Toplevel):
             ("clientes", "Clientes", 90), ("trab", "Trabajadoras", 120), ("asig", "Asignaciones", 120)])
         marco.pack(fill="both", expand=True)
         pie = ttk.Frame(cont)
-        pie.pack(fill="x", pady=(14, 0))
+        # Antes que la lista en el orden de empaque: con poco espacio (pantalla chica o escala 125-150 %) se
+        # achica la lista y los botones de abajo siguen visibles.
+        pie.pack(side="bottom", fill="x", pady=(14, 0), before=marco)
         ttk.Button(pie, text="Cerrar", style="Secundario.TButton", command=self.destroy).pack(side="right")
         self.btn_restaurar = ttk.Button(pie, text="Restaurar la copia elegida", style="Peligro.TButton",
                                         command=self.restaurar, state="disabled")
@@ -4357,7 +4423,9 @@ class App:
         aplicar_tema(root)
         poner_icono(root)
         centrar(root, 1320, 820)  # tamaño al salir de maximizado
-        root.minsize(1100, 660)
+        factor = escala_pantalla(root)   # con la escala de Windows al 125 % o 150 % el mínimo crece igual que el texto
+        root.minsize(min(round(1100 * factor), root.winfo_screenwidth() - 20),
+                     min(round(660 * factor), root.winfo_screenheight() - 80))
         maximizar(root)
         # F11: pantalla completa total (sin barra de título). Esc: salir de ella.
         root.bind("<F11>", lambda e: root.attributes(
@@ -4555,7 +4623,7 @@ class App:
                 parent=self.root):
             return False
         import tempfile
-        with tempfile.TemporaryDirectory(prefix="agencia-restauracion-") as carpeta:
+        with tempfile.TemporaryDirectory(prefix="agencia-restauracion-", ignore_cleanup_errors=True) as carpeta:
             fuente_segura = os.path.join(carpeta, "fuente.db")
             copiar_base(copia["ruta"], fuente_segura)
             for pagina in (self.clientes, self.trabajadoras):
@@ -5022,10 +5090,45 @@ COPIA_CADA_MS = 24 * 60 * 60 * 1000   # copia automática cada 24 horas (además
 CONFIG_PATH = os.path.join(CARPETA, "configuracion.json")
 
 
+def uri_sqlite(ruta):
+    """URI «file:» que SQLite acepta para la ruta, también en unidades de red de Windows.
+
+    En Windows no se usa Path.resolve(): convierte una unidad asignada (Z:\\) en \\\\servidor\\recurso y as_uri()
+    daría «file://servidor/...», que SQLite rechaza («invalid uri authority»). Las rutas UNC se escriben con la
+    autoridad vacía (file:////servidor/recurso/...), la forma que SQLite admite."""
+    if sys.platform != "win32":
+        return Path(ruta).resolve().as_uri()
+    from urllib.parse import quote
+    ruta = os.path.abspath(os.fspath(ruta)).replace("\\", "/")
+    if ruta.startswith("//?/UNC/"):
+        ruta = "//" + ruta[8:]
+    elif ruta.startswith("//?/"):
+        ruta = ruta[4:]
+    if ruta.startswith("//"):
+        return "file:////" + quote(ruta[2:], safe="/:")
+    return "file:///" + quote(ruta, safe="/:")
+
+
 def conexion_lectura(ruta, timeout=1):
     """Abre un archivo existente sin crearlo ni permitir escrituras."""
-    uri = Path(ruta).resolve().as_uri() + "?mode=ro"
-    return sqlite3.connect(uri, uri=True, timeout=timeout)
+    return sqlite3.connect(uri_sqlite(ruta) + "?mode=ro", uri=True, timeout=timeout)
+
+
+def reintentar_si_windows_bloquea(funcion, *argumentos, intentos=8, espera=0.1):
+    """Ejecuta os.replace/os.remove reintentando si Windows lo impide por un momento.
+
+    En Windows el antivirus, el indexador de búsqueda, OneDrive o una vista previa abren los archivos recién
+    escritos durante un instante, y mover o borrar uno en ese momento falla con «acceso denegado» (5) o
+    «archivo en uso» (32). En Mac y Linux no ocurre: allí se ejecuta una sola vez."""
+    import time
+    total = intentos if sys.platform == "win32" else 1
+    for intento in range(total):
+        try:
+            return funcion(*argumentos)
+        except PermissionError as error:
+            if intento >= total - 1 or getattr(error, "winerror", None) not in (5, 32, 33):
+                raise
+            time.sleep(espera * (intento + 1))
 
 
 def base_sana(ruta):
@@ -5118,7 +5221,7 @@ def archivo_atomico(ruta, encoding="utf-8", newline=None):
             yield archivo
             archivo.flush()
             os.fsync(archivo.fileno())
-        os.replace(temporal, ruta)
+        reintentar_si_windows_bloquea(os.replace, temporal, ruta)
         temporal = None
     finally:
         if descriptor is not None:
@@ -5212,7 +5315,7 @@ def copiar_base(origen, destino):
         # Se conserva la comprobación usada por el diagnóstico y las pruebas de errores.
         if not base_sana(temporal) or contar_datos(temporal) is None:
             raise sqlite3.DatabaseError("La copia no pasó la verificación.")
-        os.replace(temporal, destino)
+        reintentar_si_windows_bloquea(os.replace, temporal, destino)
         temporal = None
     finally:
         fuente.close()
@@ -5310,8 +5413,22 @@ def _revertir_csvs(carpeta, resguardo, anteriores, nombres):
     return errores
 
 
+class CSVOcupados(OSError):
+    """Algún CSV de «Datos legibles» está abierto en otro programa y Windows no deja reemplazarlo."""
+
+    def __init__(self, nombres):
+        self.nombres = list(nombres)
+        super().__init__(
+            f"No se actualizó{'' if len(self.nombres) == 1 else 'n'} {', '.join(self.nombres)} en «Datos legibles» "
+            "porque está abierto en otro programa (por ejemplo Excel). Ciérrelo y se actualizará en la próxima "
+            "copia. La copia de seguridad de los datos sí se guardó.")
+
+
 def _publicar_csvs(preparados, carpeta, resguardo, nombres):
-    """Guarda los anteriores antes del primer reemplazo y revierte una publicación fallida."""
+    """Guarda los anteriores antes del primer reemplazo y revierte una publicación fallida.
+
+    En Windows, Excel no deja reemplazar un CSV que tiene abierto: ese archivo se conserva como estaba, los
+    demás se actualizan y al final se avisa con CSVOcupados (un mensaje que no cambia de una copia a otra)."""
     import shutil
     anteriores = []
     for nombre in nombres:
@@ -5324,12 +5441,24 @@ def _publicar_csvs(preparados, carpeta, resguardo, nombres):
                    "ausentes": [n for n in nombres if n not in anteriores]}, archivo, ensure_ascii=False, indent=2)
         archivo.flush()
         os.fsync(archivo.fileno())
+    publicados, ocupados, actual = [], [], None
     try:
         for nombre in nombres:
-            os.replace(os.path.join(preparados, nombre), os.path.join(carpeta, nombre))
+            actual = nombre      # si falla a medias, este también se revierte
+            try:
+                # Excel retiene el archivo mientras esté abierto: basta un intento breve antes de dejarlo como estaba.
+                reintentar_si_windows_bloquea(os.replace, os.path.join(preparados, nombre), os.path.join(carpeta, nombre),
+                                              intentos=3)
+            except PermissionError:
+                if sys.platform != "win32":
+                    raise
+                ocupados.append(nombre)   # Windows no lo reemplazó: sigue el anterior, intacto
+            else:
+                publicados.append(nombre)
+            actual = None
     except BaseException as error:
         try:
-            errores = _revertir_csvs(carpeta, resguardo, anteriores, nombres)
+            errores = _revertir_csvs(carpeta, resguardo, anteriores, publicados + ([actual] if actual else []))
         except BaseException as fallo:
             errores = [str(fallo)]
         if errores:
@@ -5340,6 +5469,8 @@ def _publicar_csvs(preparados, carpeta, resguardo, nombres):
             fallo._resguardo_csv = resguardo
             raise fallo from error
         raise
+    if ocupados:
+        raise CSVOcupados(ocupados)
 
 
 def exportar_legible(ruta, carpeta):
@@ -5387,7 +5518,8 @@ def exportar_legible(ruta, carpeta):
 
 
 def copia_externa(ruta, carpeta, ahora=None):
-    """Una copia por día (se renueva durante el día) más los datos legibles, en una carpeta fuera del programa."""
+    """Una copia por día (se renueva durante el día) más los datos legibles, en una carpeta fuera del programa.
+    Devuelve un aviso si algún CSV no pudo actualizarse porque estaba abierto; None si todo quedó al día."""
     ahora = ahora or datetime.now()
     os.makedirs(carpeta, exist_ok=True)
     with cerrojo_carpeta(carpeta):
@@ -5396,9 +5528,9 @@ def copia_externa(ruta, carpeta, ahora=None):
         diarias = sorted(n for n in os.listdir(carpeta) if PATRON_EXTERNA.fullmatch(n))
         for vieja in diarias[:-DIAS_EXTERNAS]:
             try:
-                os.remove(os.path.join(carpeta, vieja))
-            except FileNotFoundError:
-                pass
+                reintentar_si_windows_bloquea(os.remove, os.path.join(carpeta, vieja))
+            except OSError:
+                pass   # abierta en otro programa o sincronizándose: se borrará en la próxima copia
         leame = os.path.join(carpeta, "LEEME.txt")
         if not os.path.exists(leame):
             with archivo_atomico(leame) as archivo:
@@ -5408,7 +5540,11 @@ def copia_externa(ruta, carpeta, ahora=None):
                               "Los textos que podrían interpretarse como fórmulas llevan un apóstrofo protector.\n"
                               "Para recuperar: abra el programa y pulse Cmd+Shift+B (Mac) o Ctrl+Shift+B (Windows) > Restaurar una copia.\n"
                               "No borre esta carpeta: es su respaldo si algo le pasa a la computadora.\n")
-        exportar_legible(destino, os.path.join(carpeta, "Datos legibles"))
+        try:
+            exportar_legible(destino, os.path.join(carpeta, "Datos legibles"))
+        except CSVOcupados as aviso:
+            return str(aviso)     # la copia .db está hecha; solo quedó algún CSV sin actualizar
+    return None
 
 
 def nombre_copia(motivo, ahora):
@@ -5452,9 +5588,9 @@ def podar_respaldos(carpeta, ahora=None):
         borrar += [nombre for _, nombre in sorted(grupos[tipo])[:-limite]]
     for nombre in borrar:
         try:
-            os.remove(os.path.join(carpeta, nombre))
-        except FileNotFoundError:
-            pass
+            reintentar_si_windows_bloquea(os.remove, os.path.join(carpeta, nombre))
+        except OSError:
+            pass   # abierta en otro programa (p. ej. la lista de copias): se borrará en la próxima copia
 
 
 def respaldar(motivo="auto", ruta=None, carpeta=None, externas=None, ahora=None):
@@ -5485,8 +5621,10 @@ def respaldar(motivo="auto", ruta=None, carpeta=None, externas=None, ahora=None)
             resultado["errores"].append(f"Copia en la carpeta del programa: {error}")
         for externa in (carpetas_externas() if externas is None else externas):
             try:
-                copia_externa(ruta, externa, ahora)
+                aviso = copia_externa(ruta, externa, ahora)
                 resultado["externas"].append(externa)
+                if aviso:
+                    resultado["errores"].append(f"Copia en «{externa}»: {aviso}")
             except (OSError, sqlite3.Error) as error:
                 resultado["errores"].append(f"Copia en «{externa}»: {error}")
     return resultado
@@ -5597,7 +5735,8 @@ def restaurar_si_esta_danada(ruta=None, carpeta=None):
     destino = CARPETA_RESPALDOS if carpeta is None else carpetas[0][0]
     os.makedirs(destino, exist_ok=True)
     apartada = os.path.join(destino, f"agencia-danada-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.db")
-    with tempfile.TemporaryDirectory(prefix="agencia-recuperacion-", dir=Path(ruta).parent) as temporal:
+    with tempfile.TemporaryDirectory(prefix="agencia-recuperacion-", dir=Path(ruta).parent,
+                                     ignore_cleanup_errors=True) as temporal:
         preparada = os.path.join(temporal, "verificada.db")
         copiar_base(sano["ruta"], preparada)
         migrada = BaseDatos(preparada)
@@ -5672,9 +5811,10 @@ def reabrir_con_tk_moderno():
             continue
 
 
-def registrar_error(info, ruta=ERRORES_PATH):
+def registrar_error(info, ruta=None):
     """Anota un error inesperado en errores.log (junto al programa) y devuelve su detalle.
     Sin consola (pyw / .exe) un fallo en un botón pasaría sin que nadie lo note."""
+    ruta = ERRORES_PATH if ruta is None else ruta
     import traceback
     detalle = "".join(traceback.format_exception(*info))
     try:

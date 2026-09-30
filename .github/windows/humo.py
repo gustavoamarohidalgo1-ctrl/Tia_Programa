@@ -59,6 +59,56 @@ _startfile = getattr(os, "startfile", None)
 os.startfile = lambda ruta, *a, **k: anotar(f"os.startfile({ruta})") if os.path.exists(ruta) else fallo(f"startfile sin destino: {ruta}")
 
 
+ESCALA = float(os.environ.get("AGENCIA_PRUEBA_ESCALA", "1") or 1)   # 1.5 = pantalla de Windows al 150 %
+CAPTURAS = os.environ.get("AGENCIA_PRUEBA_CAPTURAS")
+
+
+def captura(nombre):
+    """Foto de la pantalla (solo Windows, si se pidió), para revisar a ojo cómo se ve cada ventana."""
+    if not CAPTURAS or sys.platform != "win32":
+        return
+    import subprocess
+    os.makedirs(CAPTURAS, exist_ok=True)
+    destino = os.path.join(CAPTURAS, f"{nombre}-{int(ESCALA * 100)}.png")
+    guion = ("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; "
+             "$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
+             "$i = New-Object System.Drawing.Bitmap $b.Width, $b.Height; "
+             "$g = [System.Drawing.Graphics]::FromImage($i); "
+             "$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); "
+             f"$i.Save('{destino}')")
+    subprocess.run(["powershell", "-NoProfile", "-Command", guion], timeout=60)
+
+
+def cabe(ventana, nombre):
+    """Cada botón de la ventana se ve entero (nada cortado) y la ventana cabe en la pantalla.
+    Que una lista pida más alto del que tiene no importa: se achica y se desplaza."""
+    ventana.update()
+    real = (ventana.winfo_width(), ventana.winfo_height())
+    pantalla = (ventana.winfo_screenwidth(), ventana.winfo_screenheight())
+    anotar(f"{nombre}: pide {(ventana.winfo_reqwidth(), ventana.winfo_reqheight())}, tiene {real}, pantalla {pantalla}")
+    if real[0] > pantalla[0] or real[1] > pantalla[1]:
+        fallo(f"{nombre}: la ventana {real} es más grande que la pantalla {pantalla}")
+    x0, y0 = ventana.winfo_rootx(), ventana.winfo_rooty()
+    pendientes, botones = list(ventana.winfo_children()), 0
+    while pendientes:
+        w = pendientes.pop()
+        pendientes.extend(w.winfo_children())
+        if w.winfo_class() not in ("TButton", "Button"):
+            continue
+        botones += 1
+        texto = w.cget("text")
+        if not w.winfo_ismapped():
+            fallo(f"{nombre}: el botón «{texto}» no se ve")
+            continue
+        x, y = w.winfo_rootx() - x0, w.winfo_rooty() - y0
+        if (w.winfo_height() < w.winfo_reqheight() - 2 or w.winfo_width() < w.winfo_reqwidth() - 2
+                or x < 0 or y < 0 or x + w.winfo_width() > real[0] + 1 or y + w.winfo_height() > real[1] + 1):
+            fallo(f"{nombre}: el botón «{texto}» queda cortado ({w.winfo_width()}x{w.winfo_height()} en {x},{y}; "
+                  f"necesita {w.winfo_reqwidth()}x{w.winfo_reqheight()}; ventana {real})")
+    if not botones:
+        fallo(f"{nombre}: no se encontraron botones")
+
+
 def paso(nombre):
     def decorador(funcion):
         def envoltura(*args):
@@ -96,6 +146,9 @@ def main():
     if os.path.normcase(agencia.CARPETA) != os.path.normcase(DATOS):
         fallo(f"--datos no se respetó: {agencia.CARPETA}")
     root = tk.Tk()
+    if ESCALA != 1:
+        root.tk.call("tk", "scaling", ESCALA * 96 / 72)    # lo que hace Tk en Windows con esa escala de pantalla
+        anotar(f"Escala simulada {ESCALA:.0%}: factor del programa {agencia.escala_pantalla(root):.2f}")
     root.report_callback_exception = lambda t, v, tb: fallo("Tk callback:\n" + "".join(traceback.format_exception(t, v, tb)))
     os.makedirs(agencia.CARPETA, exist_ok=True)
     aviso, oferta = agencia.preparar_base()
@@ -211,13 +264,48 @@ def main():
         app.contratos.imprimir_contrato(c)
         root.update()
 
+    @paso("ventanas de diálogo completas (nada cortado)")
+    def dialogos():
+        c = app.db.todos("colocaciones")[0]
+        cli = app.db.uno("clientes", int(c["cliente_id"]))
+        tra = app.db.uno("trabajadoras", int(c["trabajadora_id"]))
+        captura("principal")
+        for nombre, abrir in (("Datos del contrato", lambda: app.contratos.editar_datos(c)),
+                              ("Firmas", lambda: agencia.DialogoFirmas(app.contratos, c, cli, tra, lambda f: True)),
+                              ("Áreas", lambda: agencia.DialogoAreas(root, app)),
+                              ("Copias de seguridad", lambda: agencia.DialogoCopias(root, app))):
+            antes = set(root.winfo_children())
+            abrir()
+            root.update()
+            nuevas = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w not in antes]
+            nuevas += [w for w in app.contratos.winfo_children() if isinstance(w, tk.Toplevel) and w not in antes]
+            if not nuevas:
+                fallo(f"No se abrió la ventana «{nombre}»")
+            for ventana in nuevas:
+                cabe(ventana, nombre)
+                captura(nombre.lower().replace(" ", "-").replace("á", "a"))
+                ventana.destroy()
+                root.update()
+
+        def revisar_pregunta():
+            for ventana in root.winfo_children():
+                if isinstance(ventana, tk.Toplevel) and ventana.title() == "Inicio de trabajo":
+                    cabe(ventana, "Inicio de trabajo")
+                    captura("inicio-de-trabajo")
+                    ventana.destroy()
+                    return
+            fallo("No apareció la pregunta «Inicio de trabajo»")
+        root.after(500, revisar_pregunta)
+        agencia.pedir_texto(root, "Inicio de trabajo", "¿Qué día empieza María José Ñandú Peña de la Cruz a "
+                            "trabajar?\n(dd/mm/aaaa)", "01/10/2026")
+
     @paso("abrir carpeta de datos")
     def carpeta():
         if sys.platform == "win32":
             agencia.abrir_carpeta(agencia.CARPETA)
 
     for accion in (recorrer, cliente, trabajadora, asignar, area, copia, copia_fondo, exportar,
-                   restaurar, imprimir, carpeta):
+                   restaurar, imprimir, dialogos, carpeta):
         accion()
         root.update()
 

@@ -11,7 +11,9 @@ ManifestDPIAware true      ; texto nítido en pantallas con escala 125 % o 150 %
 !define NOMBRE "Agencia de Empleos"
 !define CLAVE_DESINSTALAR "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenciaDeEmpleos"
 !define DATOS "$LOCALAPPDATA\${NOMBRE}"
-!define COMANDO_ARGUMENTOS '"$INSTDIR\app\iniciar.pyw" --datos "${DATOS}"'
+; -E y -s: el Python incluido ignora variables PYTHON* y paquetes de usuario que otros programas hayan dejado.
+; (No usar -I: quitaría la carpeta de iniciar.pyw de sys.path.)
+!define COMANDO_ARGUMENTOS '-E -s "$INSTDIR\app\iniciar.pyw" --datos "${DATOS}"'
 
 Name "${NOMBRE}"
 OutFile "${SALIDA}"
@@ -57,56 +59,61 @@ Section "Instalar"
   StrCpy $RuntimeAnterior 0
   StrCpy $AppAnterior 0
   StrCpy $DesinstaladorAnterior 0
-  StrCpy $RuntimePublicado 0
-  StrCpy $AppPublicado 0
-  StrCpy $DesinstaladorPublicado 0
-  ClearErrors
-  CreateDirectory "$INSTDIR"
-  GetTempFileName $Actualizacion "$INSTDIR"
-  IfErrors fallo_preparacion
-  Delete "$Actualizacion"
-  CreateDirectory "$Actualizacion"
-  SetOutPath "$Actualizacion\runtime"
-  File /r "${RUNTIME}\*"
-  IfErrors fallo_preparacion
-  SetOutPath "$Actualizacion\app"
-  File /r "${APLICACION}\*"
-  IfErrors fallo_preparacion
-  WriteUninstaller "$Actualizacion\Desinstalar.exe"
-  IfErrors fallo_preparacion
+  StrCpy $Extrayendo 0
   SetOutPath "$INSTDIR"
-  Call ComprobarArchivosEnUso
-  Call ComprobarDatosHeredados
+  Call RecuperarInstalacionInterrumpida
 
-  ; Mantener la instalación anterior hasta publicar las tres piezas completas.
-  IfFileExists "$INSTDIR\runtime\*.*" 0 mover_app
-    ClearErrors
-    Rename "$INSTDIR\runtime" "$Actualizacion\runtime-anterior"
-    IfErrors recuperar_anterior
+  ; 1) Apartar la versión instalada. Son archivos que no se acaban de escribir, así que el antivirus rara vez
+  ;    los retiene; aun así se reintenta. La versión nueva NO se mueve después de escribirla: se extrae
+  ;    directamente en su lugar (mover archivos recién escritos es lo que el antivirus suele impedir).
+  CreateDirectory "${ANTERIOR}"
+  ${If} ${FileExists} "$INSTDIR\runtime\*.*"
+    StrCpy $Origen "$INSTDIR\runtime"
+    StrCpy $Destino "${ANTERIOR}\runtime"
+    Call MoverConReintentos
+    StrCmp $Movido 1 0 no_se_pudo_apartar
     StrCpy $RuntimeAnterior 1
-  mover_app:
-  IfFileExists "$INSTDIR\app\*.*" 0 mover_desinstalador
-    ClearErrors
-    Rename "$INSTDIR\app" "$Actualizacion\app-anterior"
-    IfErrors recuperar_anterior
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\app\*.*"
+    StrCpy $Origen "$INSTDIR\app"
+    StrCpy $Destino "${ANTERIOR}\app"
+    Call MoverConReintentos
+    StrCmp $Movido 1 0 no_se_pudo_apartar
     StrCpy $AppAnterior 1
-  mover_desinstalador:
-  IfFileExists "$INSTDIR\Desinstalar.exe" 0 publicar_runtime
-    ClearErrors
-    Rename "$INSTDIR\Desinstalar.exe" "$Actualizacion\Desinstalar-anterior.exe"
-    IfErrors recuperar_anterior
-    StrCpy $DesinstaladorAnterior 1
-  publicar_runtime:
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\Desinstalar.exe"
+    StrCpy $Origen "$INSTDIR\Desinstalar.exe"
+    StrCpy $Destino "${ANTERIOR}\Desinstalar.exe"
+    Call MoverConReintentos
+    StrCpy $DesinstaladorAnterior $Movido
+  ${EndIf}
+
+  ; 2) Escribir la versión nueva en su lugar. Si algo falla aquí, .onInstFailed o el bloque de abajo
+  ;    devuelven la versión anterior.
+  StrCpy $Extrayendo 1
+  SetOutPath "$INSTDIR\runtime"
+  File /r "${RUNTIME}\*"
+  SetOutPath "$INSTDIR\app"
+  File /r "${APLICACION}\*"
+  SetOutPath "$INSTDIR"
+  ${IfNot} ${FileExists} "$INSTDIR\runtime\pythonw.exe"
+  ${OrIfNot} ${FileExists} "$INSTDIR\runtime\python312.dll"
+  ${OrIfNot} ${FileExists} "$INSTDIR\runtime\DLLs\_tkinter.pyd"
+  ${OrIfNot} ${FileExists} "$INSTDIR\app\agencia.py"
+  ${OrIfNot} ${FileExists} "$INSTDIR\app\iniciar.pyw"
+    Goto extraccion_incompleta
+  ${EndIf}
+  StrCpy $Extrayendo 0
+
+  ; 3) Desinstalador: si Windows no deja escribirlo, se conserva el anterior y la instalación sigue.
   ClearErrors
-  Rename "$Actualizacion\runtime" "$INSTDIR\runtime"
-  IfErrors recuperar_anterior
-  StrCpy $RuntimePublicado 1
-  Rename "$Actualizacion\app" "$INSTDIR\app"
-  IfErrors recuperar_anterior
-  StrCpy $AppPublicado 1
-  Rename "$Actualizacion\Desinstalar.exe" "$INSTDIR\Desinstalar.exe"
-  IfErrors recuperar_anterior
-  StrCpy $DesinstaladorPublicado 1
+  WriteUninstaller "$INSTDIR\Desinstalar.exe"
+  ${If} ${Errors}
+    DetailPrint "No se pudo escribir el desinstalador nuevo; se conserva el anterior."
+    ${If} $DesinstaladorAnterior == 1
+      CopyFiles /SILENT "${ANTERIOR}\Desinstalar.exe" "$INSTDIR\Desinstalar.exe"
+    ${EndIf}
+  ${EndIf}
 
   CreateDirectory "${DATOS}"
   SetOutPath "$INSTDIR\app"
@@ -125,42 +132,24 @@ Section "Instalar"
   WriteRegStr HKCU "${CLAVE_DESINSTALAR}" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
   WriteRegDWORD HKCU "${CLAVE_DESINSTALAR}" "NoModify" 1
   WriteRegDWORD HKCU "${CLAVE_DESINSTALAR}" "NoRepair" 1
+  SetOutPath "$INSTDIR"
+  RMDir /r "${ANTERIOR}"     ; si algo queda retenido, la próxima instalación lo limpia
   Goto instalacion_terminada
 
-  recuperar_anterior:
-    SetOutPath "$INSTDIR"
-    ClearErrors
-    StrCmp $RuntimePublicado 1 0 +2
-      Rename "$INSTDIR\runtime" "$Actualizacion\runtime"
-    StrCmp $AppPublicado 1 0 +2
-      Rename "$INSTDIR\app" "$Actualizacion\app"
-    StrCmp $DesinstaladorPublicado 1 0 +2
-      Rename "$INSTDIR\Desinstalar.exe" "$Actualizacion\Desinstalar.exe"
-    StrCmp $RuntimeAnterior 1 0 +2
-      Rename "$Actualizacion\runtime-anterior" "$INSTDIR\runtime"
-    StrCmp $AppAnterior 1 0 +2
-      Rename "$Actualizacion\app-anterior" "$INSTDIR\app"
-    StrCmp $DesinstaladorAnterior 1 0 +2
-      Rename "$Actualizacion\Desinstalar-anterior.exe" "$INSTDIR\Desinstalar.exe"
-    IfErrors recuperacion_incompleta
-    MessageBox MB_OK|MB_ICONSTOP "No se pudo actualizar ${NOMBRE}. La instalacion anterior se recupero y sus datos se conservaron." /SD IDOK
-    RMDir /r "$Actualizacion"
+  no_se_pudo_apartar:
+    ; Nada nuevo se escribió todavía: devolver lo que alcanzó a moverse.
+    StrCpy $Extrayendo 0
+    Call RestaurarVersionAnterior
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Windows no permitió reemplazar los archivos de la versión instalada de ${NOMBRE}. Puede que el programa siga abierto o que el antivirus los esté revisando.$\r$\n$\r$\nCierre el programa, espere un minuto y vuelva a abrir el instalador. No se modificó nada y sus datos están a salvo." /SD IDOK
     SetErrorLevel 3
     Abort
-  recuperacion_incompleta:
-    MessageBox MB_OK|MB_ICONSTOP "La actualizacion fallo y Windows no permitio recuperar todos los archivos. Sus datos permanecen aparte.$\r$\n$\r$\nSe conserva la instalacion anterior en:$\r$\n$Actualizacion" /SD IDOK
-    SetErrorLevel 3
-    Abort
-  fallo_preparacion:
-    SetOutPath "$INSTDIR"
-    StrCmp $Actualizacion "" +2
-      RMDir /r "$Actualizacion"
-    MessageBox MB_OK|MB_ICONSTOP "No se pudieron preparar los archivos nuevos. La instalacion anterior y sus datos se conservaron." /SD IDOK
+  extraccion_incompleta:
+    Call RestaurarVersionAnterior
+    StrCpy $Extrayendo 0
+    MessageBox MB_OK|MB_ICONSTOP "No se pudieron escribir todos los archivos de ${NOMBRE} (¿disco lleno o antivirus?). Se dejó la instalación como estaba y sus datos están a salvo.$\r$\n$\r$\nVuelva a intentarlo en unos minutos." /SD IDOK
     SetErrorLevel 3
     Abort
   instalacion_terminada:
-    SetOutPath "$INSTDIR"
-    RMDir /r "$Actualizacion"
 SectionEnd
 
 Section "Uninstall"
@@ -175,6 +164,8 @@ Section "Uninstall"
   ; solo lo que instaló este programa; nunca se borra una carpeta entera que el usuario haya elegido
   RMDir /r "$INSTDIR\runtime"
   RMDir /r "$INSTDIR\app"
+  RMDir /r "${ANTERIOR}"
+  RMDir /r "${FALLIDA}"
   Delete "$INSTDIR\Desinstalar.exe"
   RMDir "$INSTDIR"
 

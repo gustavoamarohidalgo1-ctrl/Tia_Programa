@@ -62,6 +62,11 @@ def mainloop(self, n=0):
 
 tk.Misc.mainloop = mainloop
 
+if sys.platform == "win32":   # el aviso de error de iniciar.pyw sería un cuadro de Windows que bloquearía la prueba
+    import ctypes
+    ctypes.windll.user32.MessageBoxW = lambda _v, texto, titulo, _t: informe["avisos"].append(
+        {"tipo": "MessageBoxW", "titulo": titulo, "mensaje": texto}) or 1
+
 try:
     runpy.run_path(sys.argv[0], run_name="__main__")
 except SystemExit as salida:
@@ -77,6 +82,6 @@ if datos:
 with open(RESULTADO, "w", encoding="utf-8") as archivo:
     json.dump(informe, archivo, ensure_ascii=False, indent=2)
 print(json.dumps(informe, ensure_ascii=False, indent=2))
-ok = (informe["cerrada"] and not informe["excepcion"] and not informe["errores_tk"]
-      and not informe.get("errores_log") and not any(a["tipo"] == "showerror" for a in informe["avisos"]))
+ok = (informe["cerrada"] and not informe["excepcion"] and not informe["errores_tk"] and not informe.get("salida")
+      and not informe.get("errores_log") and not any(a["tipo"] in ("showerror", "MessageBoxW") for a in informe["avisos"]))
 sys.exit(0 if ok else 1)

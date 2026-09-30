@@ -34,8 +34,9 @@ if ($p.ExitCode -ne 0) { Fallo "La actualización terminó con código $($p.Exit
 # 4) Primer arranque de la versión nueva con esos datos
 $s = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Agencia de Empleos\Agencia de Empleos.lnk'))
 $partes = [regex]::Matches($s.Arguments, '"([^"]*)"|(\S+)') | ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value } }
+$partes = @($partes | Select-Object -Skip ([array]::FindIndex([string[]]$partes, [Predicate[string]]{ param($x) $x -like '*.pyw' })))
 $json = Join-Path $Salida 'desde-170.json'
-& $py "$PSScriptRoot\arranque.py" $json @partes 2>&1 | Out-File (Join-Path $Salida 'desde-170.txt') -Encoding utf8
+& $py -E -s "$PSScriptRoot\arranque.py" $json @partes 2>&1 | Out-File (Join-Path $Salida 'desde-170.txt') -Encoding utf8
 if ($LASTEXITCODE -ne 0) { Fallo "El primer arranque sobre datos 1.7.0 falló: $(Get-Content $json -Raw -Encoding utf8)" }
 $r = Get-Content $json -Raw -Encoding utf8 | ConvertFrom-Json
 foreach ($a in @($r.avisos)) { Write-Host "aviso $($a.tipo): $($a.titulo) - $($a.mensaje)" }

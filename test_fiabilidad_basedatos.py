@@ -76,10 +76,10 @@ class CasosFiabilidad:
                     self.agencia, "conexion_lectura", side_effect=AssertionError("Backup a sí mismo")):
                 with self.assertRaises(ValueError):
                     self.db.restaurar_desde(ruta)
-        alias.unlink()
-        # SQLite de macOS invalida su descriptor cuando cambia el número de enlaces del archivo.
-        # La detección ocurrió sin consultas/backup; reabrir permite verificar la conservación física.
+        # SQLite de macOS invalida su descriptor cuando cambia el número de enlaces del archivo, y Windows no
+        # borra un enlace de un archivo abierto: se cierra, se borra el alias y se reabre para verificar.
         self.db.con.close()
+        alias.unlink()
         self.db = self.agencia.BaseDatos(self.ruta)
         self.assertEqual(self.nombres_directos(), ["Cliente conservado"])
 

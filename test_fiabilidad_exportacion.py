@@ -184,7 +184,7 @@ class FiabilidadExportacionTest(unittest.TestCase):
         self.assertIn(str(resguardo), str(capturado.exception))
         for nombre, datos in self.originales.items():
             self.assertEqual((resguardo / nombre).read_bytes(), datos)
-        manifest = json.loads((resguardo / "restauracion.json").read_text())
+        manifest = json.loads((resguardo / "restauracion.json").read_text(encoding="utf-8"))
         self.assertEqual(set(manifest["anteriores"]), set(self.NOMBRES))
         self.assertEqual(manifest["ausentes"], [])
         self.assertEqual((self.destino / "Notas propias.txt").read_bytes(), b"Documento ajeno a la exportacion")
@@ -205,7 +205,7 @@ class FiabilidadExportacionTest(unittest.TestCase):
             with self.assertRaises(OSError) as capturado:
                 self.exportar()
         resguardo = Path(capturado.exception._resguardo_csv)
-        manifest = json.loads((resguardo / "restauracion.json").read_text())
+        manifest = json.loads((resguardo / "restauracion.json").read_text(encoding="utf-8"))
         self.assertEqual(set(manifest["ausentes"]), set(self.NOMBRES))
         self.assertEqual(manifest["anteriores"], [])
         self.assertTrue((self.destino / "Clientes.csv").exists())
@@ -260,7 +260,7 @@ class FiabilidadExportacionTest(unittest.TestCase):
                 agencia.copia_externa(str(self.ruta), str(externa), datetime(2026, 9, 29))
         copia = externa / "agencia-20260929.db"
         self.assertTrue(copia.is_file())
-        with agencia.conexion_lectura(str(copia)) as con:
+        with closing(agencia.conexion_lectura(str(copia))) as con:
             self.assertEqual(con.execute("SELECT nombre FROM clientes").fetchone()[0], "Cliente actual")
         self.assertEqual(list((externa / "Datos legibles").iterdir()), [])
 

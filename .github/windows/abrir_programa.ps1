@@ -28,6 +28,8 @@ function Captura($n) {
 
 $errores = Join-Path $Datos 'errores.log'
 if (Test-Path $errores) { Remove-Item $errores -Force }
+$registroArranque = Join-Path $Datos 'arranque.log'
+if (Test-Path $registroArranque) { Remove-Item $registroArranque -Force }
 $antes = @(Get-Process -Name $Proceso -ErrorAction SilentlyContinue | ForEach-Object Id)
 $stdout = Join-Path $Salida "$Nombre-stdout.txt"
 $stderr = Join-Path $Salida "$Nombre-stderr.txt"
@@ -82,6 +84,11 @@ if (Test-Path $errores) {
   Fallo "errores.log tiene contenido:"
   Get-Content $errores -Raw | Write-Host
   Copy-Item $errores (Join-Path $Salida "$Nombre-errores.log")
+}
+if ((Test-Path $registroArranque) -and (Select-String -Path $registroArranque -Pattern 'Traceback|Error|Fatal' -Quiet)) {
+  Fallo "arranque.log registra un error:"
+  Get-Content $registroArranque -Raw | Write-Host
+  Copy-Item $registroArranque (Join-Path $Salida "$Nombre-arranque.log")
 }
 if (-not (Test-Path (Join-Path $Datos 'agencia.db'))) { Fallo "No se creó agencia.db en $Datos" }
 if ($fallos) { exit 1 } else { Write-Host "OK: $Nombre"; exit 0 }

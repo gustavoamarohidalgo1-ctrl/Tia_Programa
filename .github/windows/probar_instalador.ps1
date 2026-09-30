@@ -30,8 +30,9 @@ function Arranque($nombre) {
   # El programa real (iniciar.pyw -> agencia.main) con los argumentos del acceso directo; se cierra con su X.
   $s = (New-Object -ComObject WScript.Shell).CreateShortcut($Acceso)
   $partes = [regex]::Matches($s.Arguments, '"([^"]*)"|(\S+)') | ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value } }
+  $partes = @($partes | Select-Object -Skip ([array]::FindIndex([string[]]$partes, [Predicate[string]]{ param($x) $x -like '*.pyw' })))
   $json = Join-Path $Salida "$nombre.json"
-  & "$Instdir\runtime\python.exe" "$aqui\arranque.py" $json @partes 2>&1 | Out-File (Join-Path $Salida "$nombre.txt") -Encoding utf8
+  & "$Instdir\runtime\python.exe" -E -s "$aqui\arranque.py" $json @partes 2>&1 | Out-File (Join-Path $Salida "$nombre.txt") -Encoding utf8
   $codigo = $LASTEXITCODE
   $r = Get-Content $json -Raw -Encoding utf8 | ConvertFrom-Json
   Write-Host "$nombre -> código $codigo; ventana: $($r.ventana | ConvertTo-Json -Compress); avisos: $(@($r.avisos).Count)"

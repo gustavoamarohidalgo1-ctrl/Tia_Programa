@@ -72,6 +72,7 @@ if (-not (Test-Path $acceso)) { exit 1 }
 $s = (New-Object -ComObject WScript.Shell).CreateShortcut($acceso)
 Write-Host "Acceso directo: $($s.TargetPath) $($s.Arguments)"
 $partes = @([regex]::Matches($s.Arguments, '"([^"]*)"|(\S+)') | ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value } })
+$partes = @($partes | Select-Object -Skip ([array]::FindIndex([string[]]$partes, [Predicate[string]]{ param($x) $x -like '*.pyw' })))
 if ($partes.Count -ne 3 -or $partes[1] -ne '--datos' -or $partes[2] -ne $datos) { Fallo "Argumentos inesperados: $($partes -join ' ; ')"; exit 1 }
 
 Paso 'Reinstalar en silencio encima (actualización) como esa persona'
@@ -79,7 +80,7 @@ $codigo = Como "$comun\instalador.exe" @('/S') $comun 'actualizar'
 if ($codigo -ne 0) { Fallo "La actualización en silencio terminó con código $codigo" }
 
 Paso 'Abrir con pythonw.exe (como el acceso directo) y cerrar con la X'
-$argumentos = @("`"$comun\arranque.py`"", "`"$comun\arranque-pythonw.json`"", "`"$($partes[0])`"", '--datos', "`"$($partes[2])`"")
+$argumentos = @('-E', '-s', "`"$comun\arranque.py`"", "`"$comun\arranque-pythonw.json`"", "`"$($partes[0])`"", '--datos', "`"$($partes[2])`"")
 $codigo = Como "$inst\runtime\pythonw.exe" $argumentos "$inst\app" 'arranque-pythonw'
 if (Test-Path "$comun\arranque-pythonw.json") { Get-Content "$comun\arranque-pythonw.json" -Raw -Encoding utf8 | Write-Host; Copy-Item "$comun\arranque-pythonw.json" "$Salida\$etiqueta-arranque-pythonw.json" }
 else { Fallo 'pythonw no dejó resultado (no llegó a ejecutarse el programa)' }
@@ -90,7 +91,7 @@ $codigo = Como "$inst\runtime\python.exe" @("`"$comun\humo.py`"", "`"$inst\app`"
 if ($codigo -ne 0) { Fallo "humo.py falló (código $codigo)" }
 
 Paso 'Segundo arranque con datos'
-$argumentos[1] = "`"$comun\arranque-2.json`""
+$argumentos[3] = "`"$comun\arranque-2.json`""
 $codigo = Como "$inst\runtime\python.exe" $argumentos "$inst\app" 'arranque-2'
 if ($codigo -ne 0) { Fallo "El segundo arranque falló (código $codigo)" }
 

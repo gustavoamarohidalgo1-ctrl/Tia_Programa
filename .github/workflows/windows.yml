@@ -120,12 +120,18 @@ jobs:
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\resultados" | Out-Null
           python -X faulthandler -m unittest discover -v 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\resultados\unittest.txt"
           exit $LASTEXITCODE
-      - name: Recorrido completo desde el código
+      - name: Recorrido completo desde el código (pantalla al 100 %, 125 % y 150 %)
         if: always()
         shell: pwsh
         run: |
-          python .github/windows/humo.py . "$env:RUNNER_TEMP\datos-humo"
-          exit $LASTEXITCODE
+          $fallos = 0
+          foreach ($escala in '1', '1.25', '1.5') {
+            $env:AGENCIA_PRUEBA_ESCALA = $escala
+            $env:AGENCIA_PRUEBA_CAPTURAS = "$env:RUNNER_TEMP\resultados\capturas"
+            python .github/windows/humo.py . "$env:RUNNER_TEMP\datos-humo-$escala"
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::humo.py falló con escala $escala"; $fallos++ }
+          }
+          exit $fallos
       - name: Iniciar.bat
         if: always()
         shell: pwsh
