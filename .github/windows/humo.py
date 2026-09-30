@@ -47,6 +47,11 @@ for _nombre in ("showinfo", "showwarning", "showerror", "askyesno", "askokcancel
     setattr(messagebox, _nombre, _aviso(_nombre))
     setattr(agencia.messagebox, _nombre, _aviso(_nombre))
 
+# Las copias «externas» van a una carpeta de la prueba, no a Documentos: así no quedan copias que el
+# programa real ofrezca recuperar en los arranques siguientes.
+_documentos = os.path.join(DATOS, "Documentos de prueba")
+agencia.carpeta_documentos = lambda: _documentos
+
 # No abrir el navegador ni el Explorador durante la prueba, pero sí comprobar lo que se abriría.
 import webbrowser  # noqa: E402
 webbrowser.open = lambda url, *a, **k: anotar(f"webbrowser.open({url[:120]})") or True

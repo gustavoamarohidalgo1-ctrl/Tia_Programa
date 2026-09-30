@@ -11,46 +11,61 @@ concurrency:
 
 jobs:
   instalador:
-    name: Instalador (${{ matrix.os }})
+    name: Instalador (${{ matrix.os }}, ${{ matrix.modo }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
+        modo: [ventanas, silencioso]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: Instalar, abrir, recorrer, actualizar
+      - name: Instalar, abrir, recorrer, actualizar y desinstalar
         shell: pwsh
-        run: ./.github/windows/probar_instalador.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe -SinDesinstalar
+        run: |
+          $extra = @{}
+          if ('${{ matrix.modo }}' -eq 'ventanas') { $extra.ConVentanas = $true }
+          ./.github/windows/probar_instalador.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe @extra
 
-      - name: Pruebas del programa con el Python incluido en el instalador
+      - name: Actualizar desde 1.7.0 con datos
         if: always()
         shell: pwsh
-        env:
-          PYTHONUTF8: "0"
+        run: ./.github/windows/actualizar_desde_170.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe
+
+      - name: Pruebas del programa con el Python incluido en el instalador
+        if: always() && matrix.modo == 'silencioso'
+        shell: pwsh
         run: |
           $py = Join-Path $env:LOCALAPPDATA 'Programs\Agencia de Empleos\runtime\python.exe'
           & $py -X faulthandler -m unittest discover -v 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\resultados\unittest-instalado.txt"
           exit $LASTEXITCODE
 
-      - name: Desinstalar
-        if: always()
-        shell: pwsh
-        run: |
-          $i = Join-Path $env:LOCALAPPDATA 'Programs\Agencia de Empleos'
-          if (Test-Path "$i\Desinstalar.exe") {
-            $p = Start-Process "$i\Desinstalar.exe" -ArgumentList '/S', "_?=$i" -Wait -PassThru
-            "Desinstalador -> $($p.ExitCode)"
-            if ($p.ExitCode -ne 0 -or (Test-Path "$i\runtime") -or (Test-Path "$i\app")) { exit 1 }
-            if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Agencia de Empleos\agencia.db'))) { "Borró los datos"; exit 1 }
-          }
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: resultados-instalador-${{ matrix.os }}
+          name: resultados-instalador-${{ matrix.os }}-${{ matrix.modo }}
+          path: ${{ runner.temp }}/resultados
+          if-no-files-found: ignore
+
+  usuario:
+    name: Usuario con tildes (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar y usar como "José Peña"
+        shell: pwsh
+        run: ./.github/windows/otro_usuario.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-usuario-${{ matrix.os }}
           path: ${{ runner.temp }}/resultados
           if-no-files-found: ignore
 

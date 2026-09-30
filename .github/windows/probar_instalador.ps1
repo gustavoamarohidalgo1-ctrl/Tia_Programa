@@ -1,9 +1,11 @@
-# Prueba completa del instalador en Windows x64: instala en silencio, revisa archivos y accesos directos,
-# abre el programa desde el acceso directo, recorre la aplicación (humo.py), comprueba que la actualización
-# se niega con el programa abierto y que funciona con el programa cerrado, y desinstala conservando los datos.
+# Prueba completa del instalador en Windows x64: instala (con sus ventanas o en silencio), revisa archivos y
+# accesos directos, abre el programa desde el acceso directo, recorre la aplicación con datos reales en la
+# carpeta de datos, comprueba que la actualización se niega con el programa abierto y que funciona con el
+# programa cerrado sin tocar los datos, y opcionalmente desinstala conservando los datos.
 param(
   [Parameter(Mandatory)][string]$Instalador,
   [string]$Salida = "$env:RUNNER_TEMP\resultados",
+  [switch]$ConVentanas,
   [switch]$SinDesinstalar
 )
 $ErrorActionPreference = 'Continue'
@@ -24,6 +26,19 @@ function Instalar($nombre) {
   Write-Host "$nombre -> código de salida $($p.ExitCode)"
   return $p.ExitCode
 }
+function Arranque($nombre) {
+  # El programa real (iniciar.pyw -> agencia.main) con los argumentos del acceso directo; se cierra con su X.
+  $s = (New-Object -ComObject WScript.Shell).CreateShortcut($Acceso)
+  $partes = [regex]::Matches($s.Arguments, '"([^"]*)"|(\S+)') | ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value } }
+  $json = Join-Path $Salida "$nombre.json"
+  & "$Instdir\runtime\python.exe" "$aqui\arranque.py" $json @partes 2>&1 | Out-File (Join-Path $Salida "$nombre.txt") -Encoding utf8
+  $codigo = $LASTEXITCODE
+  $r = Get-Content $json -Raw -Encoding utf8 | ConvertFrom-Json
+  Write-Host "$nombre -> código $codigo; ventana: $($r.ventana | ConvertTo-Json -Compress); avisos: $(@($r.avisos).Count)"
+  foreach ($a in @($r.avisos)) { Write-Host "   aviso $($a.tipo): $($a.titulo) - $($a.mensaje)" }
+  if ($codigo -ne 0) { Fallo "$nombre falló: $(Get-Content $json -Raw -Encoding utf8)" }
+  return $r
+}
 
 Paso 'Sistema'
 Write-Host "Windows: $([Environment]::OSVersion.VersionString)  64 bits: $([Environment]::Is64BitOperatingSystem)"
@@ -32,9 +47,15 @@ Get-FileHash $Instalador -Algorithm SHA256 | Format-List | Out-String | Write-Ho
 (Get-Item $Instalador).VersionInfo | Format-List ProductName, ProductVersion, FileVersion | Out-String | Write-Host
 Remove-Item -Recurse -Force $Instdir, $Datos, $Menu -ErrorAction SilentlyContinue
 
-Paso 'Instalación silenciosa (equipo nuevo)'
-$codigo = Instalar 'Instalación'
-if ($codigo -ne 0) { Fallo "El instalador terminó con código $codigo" }
+if ($ConVentanas) {
+  Paso 'Instalación con ventanas, como una persona (equipo nuevo)'
+  & "$aqui\instalar_con_ventanas.ps1" -Instalador $Instalador -Salida $Salida
+  if ($LASTEXITCODE -ne 0) { Fallo 'La instalación con ventanas falló' }
+} else {
+  Paso 'Instalación silenciosa (equipo nuevo)'
+  $codigo = Instalar 'Instalación'
+  if ($codigo -ne 0) { Fallo "El instalador terminó con código $codigo" }
+}
 foreach ($f in 'runtime\python.exe', 'runtime\pythonw.exe', 'runtime\python312.dll', 'runtime\DLLs\_tkinter.pyd',
                'runtime\DLLs\tcl86t.dll', 'runtime\DLLs\tk86t.dll', 'runtime\DLLs\_sqlite3.pyd', 'runtime\tcl\tcl8.6\init.tcl',
                'runtime\tcl\tk8.6\tk.tcl', 'app\agencia.py', 'app\iniciar.pyw', 'app\logo.png', 'app\icono.ico', 'Desinstalar.exe') {
@@ -47,7 +68,7 @@ $reg = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninsta
 if (-not $reg) { Fallo 'No se registró en Aplicaciones instaladas' } else { Write-Host "Registrado: $($reg.DisplayName) $($reg.DisplayVersion)" }
 
 Paso 'Python incluido'
-& "$Instdir\runtime\python.exe" -c "import sys, tkinter, sqlite3, ctypes, json, html, decimal, csv, uuid, queue, webbrowser; print(sys.version); print('Tk', tkinter.TkVersion, 'SQLite', sqlite3.sqlite_version); r = tkinter.Tk(); print('patchlevel', r.tk.call('info', 'patchlevel')); r.destroy()"
+& "$Instdir\runtime\python.exe" -c "import sys, tkinter, sqlite3, ctypes, json, html, decimal, csv, uuid, queue, webbrowser, msvcrt; print(sys.version); print('Tk', tkinter.TkVersion, 'SQLite', sqlite3.sqlite_version); r = tkinter.Tk(); print('patchlevel', r.tk.call('info', 'patchlevel')); r.destroy()"
 if ($LASTEXITCODE -ne 0) { Fallo "El Python incluido no puede cargar tkinter/sqlite3 (código $LASTEXITCODE)" }
 
 Paso 'Accesos directos'
@@ -60,26 +81,25 @@ foreach ($lnk in @($Acceso, (Join-Path $Escritorio 'Agencia de Empleos.lnk'), (J
   } else { Fallo "No existe el acceso directo $lnk" }
 }
 
-Paso 'Abrir desde el acceso directo del menú Inicio (primer arranque)'
+Paso 'Abrir desde el acceso directo del menú Inicio'
 & "$aqui\abrir_programa.ps1" -Archivo $Acceso -Proceso pythonw -Datos $Datos -Nombre 'acceso-menu-inicio' -Salida $Salida
 if ($LASTEXITCODE -ne 0) { Fallo 'El programa no abrió o no cerró bien desde el acceso directo' }
 
-Paso 'Abrir con consola para ver cualquier mensaje de Python'
-$s = $sh.CreateShortcut($Acceso)
-& "$aqui\abrir_programa.ps1" -Archivo "$Instdir\runtime\python.exe" -Argumentos $s.Arguments -Carpeta "$Instdir\app" -Proceso python -Datos $Datos -Nombre 'consola' -Salida $Salida
-if ($LASTEXITCODE -ne 0) { Fallo 'El programa no abrió o no cerró bien con python.exe' }
+Paso 'Arranque real con los argumentos del acceso directo (sin datos)'
+$r = Arranque 'arranque-sin-datos'
 
-Paso 'Recorrido completo de la aplicación (humo.py)'
-$humo = Join-Path $env:RUNNER_TEMP 'datos-humo'
-Remove-Item -Recurse -Force $humo -ErrorAction SilentlyContinue
-& "$Instdir\runtime\python.exe" "$aqui\humo.py" "$Instdir\app" $humo 2>&1 | Tee-Object -FilePath (Join-Path $Salida 'humo.txt') | Write-Host
+Paso 'Recorrido completo sobre la carpeta de datos real (humo.py)'
+& "$Instdir\runtime\python.exe" "$aqui\humo.py" "$Instdir\app" $Datos 2>&1 | Tee-Object -FilePath (Join-Path $Salida 'humo.txt') | Write-Host
 if ($LASTEXITCODE -ne 0) { Fallo "humo.py falló (código $LASTEXITCODE)" }
 
-Paso 'Segundo arranque con datos existentes'
-& "$aqui\abrir_programa.ps1" -Archivo $Acceso -Proceso pythonw -Datos $Datos -Nombre 'segundo-arranque' -Salida $Salida
-if ($LASTEXITCODE -ne 0) { Fallo 'El segundo arranque falló' }
+Paso 'Abrir con datos desde el acceso directo y cerrar con la X'
+& "$aqui\abrir_programa.ps1" -Archivo $Acceso -Proceso pythonw -Datos $Datos -Nombre 'con-datos' -Salida $Salida
+if ($LASTEXITCODE -ne 0) { Fallo 'El arranque con datos falló' }
+$r = Arranque 'arranque-con-datos'
+if (@($r.avisos).Count) { Fallo "El arranque con datos mostró avisos: $($r.avisos | ConvertTo-Json -Compress)" }
 
 Paso 'Actualizar con el programa abierto (debe negarse sin tocar nada)'
+$s = $sh.CreateShortcut($Acceso)
 $abierto = Start-Process -FilePath "$Instdir\runtime\pythonw.exe" -ArgumentList $s.Arguments -WorkingDirectory "$Instdir\app" -PassThru
 $limite = (Get-Date).AddSeconds(60)
 do { Start-Sleep -Milliseconds 500; $abierto.Refresh() } until ($abierto.MainWindowTitle -like '*Agencia*' -or $abierto.HasExited -or (Get-Date) -gt $limite)
@@ -89,16 +109,18 @@ $trabajo = Start-Job -ScriptBlock { param($i) (Start-Process -FilePath $i -Argum
 if (Wait-Job $trabajo -Timeout 180) {
   $codigo = Receive-Job $trabajo
   Write-Host "Actualización con programa abierto -> código $codigo"
-  if ($codigo -eq 0) { Fallo 'El instalador reemplazó archivos con el programa abierto (esperado: negarse)' }
+  if ($codigo -ne 2) { Fallo "Con el programa abierto el instalador debía negarse con código 2 y devolvió $codigo" }
 } else {
   Fallo 'El instalador se quedó colgado con el programa abierto'
   Get-Process | Where-Object ProcessName -like 'Agencia-de-Empleos*' | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 if (-not (Test-Path "$Instdir\runtime\pythonw.exe") -or (Get-FileHash "$Instdir\app\agencia.py").Hash -ne $huella) { Fallo 'La instalación cambió tras negarse a actualizar' }
+$abierto.Refresh()
 [void]$abierto.CloseMainWindow()
-if (-not $abierto.WaitForExit(30000)) { Stop-Process -Id $abierto.Id -Force -ErrorAction SilentlyContinue; Fallo 'No se cerró el programa abierto' }
+if (-not $abierto.WaitForExit(30000)) { Stop-Process -Id $abierto.Id -Force -ErrorAction SilentlyContinue; Fallo 'No se cerró el programa abierto con la X' }
+Start-Sleep -Seconds 2
 
-Paso 'Actualizar con el programa cerrado (reinstalar encima)'
+Paso 'Actualizar con el programa cerrado (reinstalar encima, conservando datos)'
 $antesDb = (Get-FileHash (Join-Path $Datos 'agencia.db')).Hash
 $codigo = Instalar 'Actualización'
 if ($codigo -ne 0) { Fallo "La actualización terminó con código $codigo" }
@@ -108,6 +130,19 @@ Get-ChildItem $Instdir -Directory -Force | Where-Object Name -notin 'runtime', '
   ForEach-Object { Fallo "Quedó una carpeta temporal tras actualizar: $($_.Name)" }
 & "$aqui\abrir_programa.ps1" -Archivo $Acceso -Proceso pythonw -Datos $Datos -Nombre 'tras-actualizar' -Salida $Salida
 if ($LASTEXITCODE -ne 0) { Fallo 'El programa no abrió después de actualizar' }
+$r = Arranque 'arranque-tras-actualizar'
+
+Paso 'Antivirus de Windows (Defender) sobre el instalador y la instalación'
+$mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+if (Test-Path $mp) {
+  & $mp -SignatureUpdate 2>&1 | Select-Object -Last 2 | Write-Host
+  foreach ($objetivo in $Instalador, $Instdir) {
+    $salidaMp = & $mp -Scan -ScanType 3 -File $objetivo -DisableRemediation 2>&1
+    $salidaMp | Select-Object -Last 6 | Write-Host
+    if ($LASTEXITCODE -eq 2) { Fallo "Defender detectó una amenaza en $objetivo" }
+    elseif ($LASTEXITCODE -ne 0) { Write-Host "Defender no pudo analizar $objetivo (código $LASTEXITCODE)" }
+  }
+} else { Write-Host 'Defender no está disponible en esta imagen.' }
 
 if (-not $SinDesinstalar) {
   Paso 'Desinstalar (en silencio conserva los datos)'
