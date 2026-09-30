@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: windows-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -46,6 +46,33 @@ jobs:
         if: always()
         with:
           name: resultados-instalador-${{ matrix.os }}-${{ matrix.modo }}
+          path: ${{ runner.temp }}/resultados
+          if-no-files-found: ignore
+
+  antivirus:
+    name: Antivirus en tiempo real (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Encender el antivirus de Windows como en un equipo real
+        shell: pwsh
+        run: ./.github/windows/activar_defender.ps1
+      - name: Instalar y actualizar encima varias veces
+        shell: pwsh
+        run: ./.github/windows/repetir_actualizacion.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe -Veces 8
+      - name: Prueba completa con el antivirus encendido
+        if: always()
+        shell: pwsh
+        run: ./.github/windows/probar_instalador.ps1 -Instalador instaladores/Agencia-de-Empleos-Windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultados-antivirus-${{ matrix.os }}
           path: ${{ runner.temp }}/resultados
           if-no-files-found: ignore
 
