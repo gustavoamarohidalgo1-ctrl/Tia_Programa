@@ -1292,14 +1292,35 @@ def escala_pantalla(widget):
         return 1.0
 
 
+def area_de_trabajo(widget):
+    """(x, y, ancho, alto) de la pantalla sin la barra de tareas de Windows (en Mac y Linux, la pantalla entera)."""
+    if ES_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):   # SPI_GETWORKAREA
+                if rect.right > rect.left and rect.bottom > rect.top:
+                    return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+        except Exception:
+            pass
+    return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight()
+
+
+def _marco_de_ventana(widget):
+    """Alto aproximado de la barra de título y los bordes que Windows agrega a una ventana."""
+    return round(40 * escala_pantalla(widget))
+
+
 def _crecer_si_falta(ventana, ancho, alto):
-    """Si el contenido de una ventana pide más espacio que el previsto, se agranda (sin salir de la pantalla)."""
+    """Si el contenido de una ventana pide más espacio que el previsto, se agranda (sin salir del área visible)."""
     try:
         if not ventana.winfo_exists():
             return
         ventana.update_idletasks()
-        nuevo_ancho = min(max(ancho, ventana.winfo_reqwidth()), ventana.winfo_screenwidth())
-        nuevo_alto = min(max(alto, ventana.winfo_reqheight()), ventana.winfo_screenheight() - 40)
+        _, _, ancho_util, alto_util = area_de_trabajo(ventana)
+        nuevo_ancho = min(max(ancho, ventana.winfo_reqwidth()), ancho_util)
+        nuevo_alto = min(max(alto, ventana.winfo_reqheight()), alto_util - _marco_de_ventana(ventana))
         if (nuevo_ancho, nuevo_alto) != (ancho, alto):
             ventana.geometry(f"{nuevo_ancho}x{nuevo_alto}")
     except tk.TclError:
@@ -1307,17 +1328,23 @@ def _crecer_si_falta(ventana, ancho, alto):
 
 
 def centrar(ventana, ancho, alto, sobre=None):
+    """Tamaño (escalado con la pantalla) y posición centrada, siempre dentro del área visible: en Windows no se
+    mete debajo de la barra de tareas, donde quedarían ocultos los botones de abajo."""
     factor = escala_pantalla(ventana)
-    ancho = min(round(ancho * factor), ventana.winfo_screenwidth())
-    alto = min(round(alto * factor), ventana.winfo_screenheight() - 40)
+    x0, y0, ancho_util, alto_util = area_de_trabajo(ventana)
+    marco = _marco_de_ventana(ventana)
+    ancho = min(round(ancho * factor), ancho_util)
+    alto = min(round(alto * factor), alto_util - marco)
     if ES_WINDOWS and isinstance(ventana, tk.Toplevel):
         ventana.after_idle(lambda: _crecer_si_falta(ventana, ancho, alto))
     if sobre is not None:
         x = sobre.winfo_rootx() + (sobre.winfo_width() - ancho) // 2
         y = sobre.winfo_rooty() + (sobre.winfo_height() - alto) // 3
     else:
-        x = (ventana.winfo_screenwidth() - ancho) // 2
-        y = (ventana.winfo_screenheight() - alto) // 3
+        x = x0 + (ancho_util - ancho) // 2
+        y = y0 + (alto_util - alto) // 3
+    x = min(max(x, x0), x0 + ancho_util - ancho)
+    y = min(max(y, y0), y0 + alto_util - alto - marco)
     ventana.geometry(f"{ancho}x{alto}+{max(x, 0)}+{max(y, 0)}")
 
 
@@ -3216,7 +3243,8 @@ class Tarjeta(tk.Frame):
     """Acceso a un área, disponible con el mouse y el teclado."""
 
     def __init__(self, master, titulo, descripcion, comando):
-        super().__init__(master, bg=C["fondo"], width=248, height=174,
+        factor = escala_pantalla(master)
+        super().__init__(master, bg=C["fondo"], width=round(248 * factor), height=round(174 * factor),
                          highlightthickness=1, highlightbackground=C["borde"],
                          highlightcolor=C["acento"], cursor="hand2", takefocus=1)
         self.comando = comando
@@ -4249,7 +4277,8 @@ class ItemMenu(tk.Frame):
 
 class BarraLateral(tk.Frame):
     def __init__(self, master):
-        super().__init__(master, bg=C["lateral"], width=238)
+        factor = escala_pantalla(master)
+        super().__init__(master, bg=C["lateral"], width=round(238 * factor))
         self.pack_propagate(False)
         self.items = {}
         self.grupo_actual = None
@@ -4267,7 +4296,7 @@ class BarraLateral(tk.Frame):
         except tk.TclError:
             self.logo = None
         tk.Label(identidad, text=AGENCIA_NOMBRE, bg=C["activo"], fg=C["texto"],
-                 font=F["marca"], anchor="w", justify="left", wraplength=122).pack(
+                 font=F["marca"], anchor="w", justify="left", wraplength=round(122 * factor)).pack(
                      side="left", padx=(10, 0))
         tk.Frame(marca, bg=C["borde"], height=1).pack(fill="x", padx=13)
         tk.Label(marca, text=AGENCIA_ESLOGAN, bg=C["activo"], fg=C["acento"],
@@ -4447,8 +4476,9 @@ class App:
         poner_icono(root)
         centrar(root, 1320, 820)  # tamaño al salir de maximizado
         factor = escala_pantalla(root)   # con la escala de Windows al 125 % o 150 % el mínimo crece igual que el texto
-        root.minsize(min(round(1100 * factor), root.winfo_screenwidth() - 20),
-                     min(round(660 * factor), root.winfo_screenheight() - 80))
+        _, _, ancho_util, alto_util = area_de_trabajo(root)     # sin pasar debajo de la barra de tareas al maximizar
+        root.minsize(min(round(1100 * factor), ancho_util - 20),
+                     min(round(660 * factor), alto_util - _marco_de_ventana(root)))
         maximizar(root)
         # F11: pantalla completa total (sin barra de título). Esc: salir de ella.
         root.bind("<F11>", lambda e: root.attributes(
@@ -4495,6 +4525,7 @@ class App:
         self.vigilar_cambios()
         atajo = "Command" if sys.platform == "darwin" else "Control"     # las copias se manejan solas; esto es solo para restaurar
         root.bind_all(f"<{atajo}-Shift-Key-B>", lambda e: self.abrir_copias())
+        root.bind_all(f"<{atajo}-Shift-Key-b>", lambda e: self.abrir_copias())   # con Bloq Mayús activado
         self.cargar_borradores()
         root.protocol("WM_DELETE_WINDOW", self.cerrar)         # al cerrar: avisar de lo no guardado y hacer una copia
         if sys.platform == "darwin":                            # Cmd+Q también debe pasar por el mismo cuidado
