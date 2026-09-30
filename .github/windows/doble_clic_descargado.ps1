@@ -53,14 +53,17 @@ $inicio = Get-Date
 Start-Process -FilePath explorer.exe -ArgumentList "`"$archivo`""
 $eventos = New-Object System.Collections.Generic.List[string]
 $vistas = @{}
-$instalador = $false
+$vioInstalador = $false
 $segundos = $null
 $momentos = @(3, 15, 45)
 while (((Get-Date) - $inicio).TotalSeconds -lt $Espera) {
   Start-Sleep -Milliseconds 1200
   $t = [int]((Get-Date) - $inicio).TotalSeconds
   if ($momentos -and $t -ge $momentos[0]) { Captura "t$($momentos[0])s"; $momentos = @($momentos | Select-Object -Skip 1) }
-  foreach ($v in $A::RootElement.FindAll($Alcance::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+  try { $ventanasAhora = @($A::RootElement.FindAll($Alcance::Children, [System.Windows.Automation.Condition]::TrueCondition)) }
+  catch { $ventanasAhora = @() }
+  foreach ($v in $ventanasAhora) {
+   try {   # una ventana puede cerrarse mientras se la lee (p. ej. el aviso de SmartScreen al pulsar Ejecutar)
     $h = $v.Current.NativeWindowHandle
     if ($antes.ContainsKey($h)) { continue }
     $pn = try { (Get-Process -Id $v.Current.ProcessId -ErrorAction Stop).ProcessName } catch { '?' }
@@ -73,7 +76,7 @@ while (((Get-Date) - $inicio).TotalSeconds -lt $Espera) {
     }
     $titulo = $v.Current.Name
     if ($pn -eq $proceso -and $titulo -like '*Agencia de Empleos*') {
-      if (-not $instalador) { $instalador = $true; $segundos = $t; Write-Host "LA VENTANA DEL INSTALADOR APARECIÓ a los $t s"; Start-Sleep 2; Captura 'instalador' }
+      if (-not $vioInstalador) { $vioInstalador = $true; $segundos = $t; Write-Host "LA VENTANA DEL INSTALADOR APARECIÓ a los $t s"; Start-Sleep 2; Captura 'instalador' }
       continue
     }
     # Los avisos normales de Windows para archivos descargados: se aceptan como lo haría la persona
@@ -93,10 +96,11 @@ while (((Get-Date) - $inicio).TotalSeconds -lt $Espera) {
       $r = Pulsar $v @('Run', '&Run', 'Ejecutar', '&Ejecutar')
     }
     if ($r) { $linea = "t=${t}s en '$titulo': $r"; Write-Host $linea; $eventos.Add($linea) }
+   } catch { Write-Host "t=${t}s (ventana cerrada mientras se leía: $($_.Exception.GetType().Name))" }
   }
-  if ($instalador -and $t -gt $segundos + 4) { break }
+  if ($vioInstalador -and $t -gt $segundos + 4) { break }
 }
-if (-not $instalador) { Captura 'final'; Write-Host "NO APARECIÓ la ventana del instalador en $Espera s" }
+if (-not $vioInstalador) { Captura 'final'; Write-Host "NO APARECIÓ la ventana del instalador en $Espera s" }
 $corriendo = @(Get-Process -Name $proceso -ErrorAction SilentlyContinue)
 Write-Host "Procesos del instalador todavía abiertos: $($corriendo.Count)"
 $corriendo | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -116,7 +120,7 @@ if (Test-Path $archivo) {
   Write-Host "Escaneo con la nube: código $LASTEXITCODE"; $escaneo | Select-Object -Last 4 | Write-Host
 } else { $eventos.Add('El archivo desapareció de Descargas (¿el antivirus lo quitó?)'); Write-Host 'El archivo desapareció de Descargas' }
 
-$resumen = [ordered]@{ instalador = $Nombre; aparecio = $instalador; segundos = $segundos; eventos = $eventos; detecciones = $detecciones.Count }
+$resumen = [ordered]@{ instalador = $Nombre; aparecio = $vioInstalador; segundos = $segundos; eventos = $eventos; detecciones = $detecciones.Count }
 $resumen | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $Salida "$Nombre-resumen.json") -Encoding utf8
 $resumen | ConvertTo-Json -Depth 4 | Write-Host
-if ($instalador) { exit 0 } else { exit 1 }
+if ($vioInstalador) { exit 0 } else { exit 1 }
