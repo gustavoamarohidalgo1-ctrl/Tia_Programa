@@ -11,6 +11,23 @@ $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Salida | Out-Null
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
 $A = [System.Windows.Automation.AutomationElement]
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class Ventanas {
+  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr dialogo, int id);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr ventana);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr ventana, int mensaje, IntPtr w, IntPtr l);
+}
+'@
+function Pulsar($ventana, $boton) {
+  # WM_COMMAND con el identificador del botón: lo mismo que recibe el diálogo cuando se hace clic en él.
+  $dialogo = [IntPtr]$ventana.Current.NativeWindowHandle
+  $id = 1
+  if ($boton.Current.AutomationId -match '^\d+$') { $id = [int]$boton.Current.AutomationId }
+  $control = [Ventanas]::GetDlgItem($dialogo, $id)
+  [void][Ventanas]::PostMessage($dialogo, 0x0111, [IntPtr]$id, $control)
+}
 $fallos = 0
 function Fallo($t) { Write-Host "::error::$Nombre - $t"; $script:fallos++ }
 function Captura($n) {
@@ -59,8 +76,7 @@ while (-not $p.HasExited -and (Get-Date) -lt $limite) {
       Fallo "El instalador mostró un aviso de error: $texto"
     }
     $ultimo = $texto
-    try { $boton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
-    catch { Write-Host "No se pudo pulsar: $_" }
+    Pulsar $v $boton
     break
   }
 }
