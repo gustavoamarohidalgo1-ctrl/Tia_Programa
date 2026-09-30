@@ -2,7 +2,8 @@ name: Doble clic como en casa
 
 # Reproduce a la persona que recibe el instalador por WhatsApp y lo abre con doble clic, en una Windows con el
 # antivirus en la nube y SmartScreen encendidos, como una computadora de casa. Compara el instalador nuevo con
-# el 1.7.1 (con el que «no aparecía nada») y con el 1.6.3 (que sí se instaló).
+# el 1.7.1 (con el que «no aparecía nada»). El 1.6.3 (que sí se instaló) se comparó una vez desde un borrador
+# privado ya eliminado: los tres abrían igual tras el aviso de SmartScreen.
 on:
   push:
     paths:
@@ -22,11 +23,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        instalador: [nuevo, v1.7.1, v1.6.3]
+        instalador: [nuevo, v1.7.1]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    permissions:
-      contents: write    # para leer el borrador privado con el instalador 1.6.3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,12 +39,6 @@ jobs:
           switch ('${{ matrix.instalador }}') {
             'nuevo'  { Copy-Item instaladores/Agencia-de-Empleos-Windows-x64.exe $destino }
             'v1.7.1' { cmd /c "git cat-file blob 652aa47:instaladores/Agencia-de-Empleos-Windows-x64.exe > `"$destino`"" }
-            'v1.6.3' {
-              $r = gh api "repos/${{ github.repository }}/releases" | ConvertFrom-Json | Where-Object { $_.draft -and $_.name -like 'Diagn*' } | Select-Object -First 1
-              $a = $r.assets | Where-Object name -like '*1.6.3*' | Select-Object -First 1
-              Invoke-WebRequest -Uri "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($a.id)" `
-                -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/octet-stream' } -OutFile $destino
-            }
           }
           Get-FileHash $destino | Format-List | Out-String | Write-Host
           if ((Get-Item $destino).Length -lt 1000000) { throw 'No se obtuvo el instalador' }

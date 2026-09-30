@@ -1,2 +1,2 @@
-793c40e5eb43bcacdc8ffbba6eec9d513d689abf1d980748ea3e77edd31cad84  Agencia-de-Empleos-Windows-x64.exe
+13aadaeeef1d43f856f4b9f3d1ab52e38f05880fafcf6aa36e883e263797d9d5  Agencia-de-Empleos-Windows-x64.exe
 f98f37b9cd13fbbb6dd844fb70c15f405412d130089d5a3cdea3b8ac1ccd5650  Agencia-de-Empleos-Mac-arm64.dmg

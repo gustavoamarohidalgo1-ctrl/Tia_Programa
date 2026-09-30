@@ -4,7 +4,9 @@ Version de distribucion: Windows 1.7.2 - Mac 1.7.1.
 
 INSTALAR EN WINDOWS (recomendado, no hace falta instalar Python)
   1. Descargue instaladores\Agencia-de-Empleos-Windows-x64.exe
-     (en GitHub: abra el archivo y pulse "Download raw file").
+     (en GitHub: abra el archivo y pulse "Download raw file"). Si lo recibe por
+     WhatsApp, NO lo abra desde WhatsApp (no ejecuta .exe y no muestra nada):
+     guardelo en Descargas y abralo desde alli. Puede tardar unos segundos.
   2. Doble clic en el archivo descargado. Si Edge dice que "no se descarga
      habitualmente": "..." > "Conservar". Si aparece "Windows protegio su PC":
      "Mas informacion" > "Ejecutar de todas formas". No pide administrador.

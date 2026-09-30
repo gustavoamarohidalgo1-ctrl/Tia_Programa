@@ -15,6 +15,8 @@ En GitHub, abra el archivo correspondiente y use **Download raw file** para desc
 
 ### Windows: si aparece un aviso
 
+Si lo recibe por **WhatsApp**, no lo abra desde dentro de WhatsApp (la aplicación de Windows no ejecuta archivos `.exe` y no muestra nada): guárdelo en **Descargas** y ábralo desde allí con doble clic. Tras el doble clic puede tardar unos segundos en aparecer, mientras el antivirus lo revisa.
+
 El instalador no está firmado digitalmente, así que Windows puede advertir la primera vez:
 
 - **Edge:** «no se descarga habitualmente» → menú **…** → **Conservar**.

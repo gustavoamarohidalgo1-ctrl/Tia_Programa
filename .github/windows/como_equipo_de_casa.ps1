@@ -31,7 +31,11 @@ $eicar = Join-Path $env:USERPROFILE 'Downloads\prueba-eicar.com'
 New-Item -ItemType Directory -Force (Split-Path $eicar) | Out-Null
 $texto = 'X5O!P%@AP[4\PZX54(P^)7CC)7}' + '$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
 try { [IO.File]::WriteAllText($eicar, $texto) } catch { Write-Host "El antivirus impidió escribir EICAR: $_" }
-Start-Sleep -Seconds 8
-if (Test-Path $eicar) { Write-Host '::warning::EICAR sigue en Descargas: el antivirus no está bloqueando como en una PC de casa'; Remove-Item $eicar -Force -ErrorAction SilentlyContinue }
-else { Write-Host 'Antivirus activo de verdad: EICAR fue bloqueado' }
+Start-Sleep -Seconds 3
+$bloqueado = $false
+try { $null = [IO.File]::ReadAllText($eicar) } catch { $bloqueado = $true }   # al abrirlo, el antivirus lo revisa
+Start-Sleep -Seconds 5
+if ($bloqueado -or -not (Test-Path $eicar) -or (Get-MpThreatDetection -ErrorAction SilentlyContinue)) { Write-Host 'Antivirus activo de verdad: bloqueó el archivo de prueba EICAR' }
+else { Write-Host '::warning::El antivirus no bloqueó EICAR: esta máquina no reproduce una PC de casa' }
+Remove-Item $eicar -Force -ErrorAction SilentlyContinue
 exit 0
