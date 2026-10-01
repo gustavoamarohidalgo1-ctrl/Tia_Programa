@@ -1,6 +1,6 @@
 # Agencia de Empleos — Servicio Exclusivo
 
-Aplicación de escritorio para registrar clientes y trabajadoras, gestionar áreas y asignaciones, preparar y firmar contratos, cobrar comisiones y administrar garantías. **Versiones de distribución: Windows 1.7.2 · Mac 1.7.1.**
+Aplicación de escritorio para registrar clientes y trabajadoras, gestionar áreas y asignaciones, preparar y firmar contratos, cobrar comisiones y administrar garantías. **Versiones de distribución: Windows 1.8.0 · Mac 1.7.1.**
 
 ## Descargar e instalar
 
@@ -52,13 +52,13 @@ Este repositorio contiene únicamente el programa y sus instaladores. Los regist
 
 ## Pruebas
 
-Las **323 pruebas** pasan en macOS y en Windows x64. Usan registros ficticios y bases temporales; son independientes de otros proyectos. `test_windows.py` cubre comportamientos propios de Windows (archivos retenidos por el antivirus, CSV abiertos en Excel, rutas de red, datos de la versión portable); las marcadas «solo Windows» se omiten en otros sistemas. Con Python que incluya Tk y una sesión gráfica disponible:
+Las **361 pruebas** pasan en macOS (se omiten 4 que son solo de Windows); en Windows x64 las ejecuta el flujo de GitHub Actions. Usan registros ficticios y bases temporales, y nunca la carpeta de datos real aunque se ejecuten desde el proyecto; son independientes de otros proyectos. `test_windows.py` cubre comportamientos propios de Windows (archivos retenidos por el antivirus, CSV abiertos en Excel, rutas de red, datos de la versión portable); las marcadas «solo Windows» se omiten en otros sistemas. Con Python que incluya Tk y una sesión gráfica disponible:
 
 ```sh
 python -m unittest discover -v
 ```
 
-Las pruebas del constructor de Windows requieren `makensis`. La comprobación del recurso de versión portable necesita PyInstaller; las pruebas de recreación del lanzador utilizan las herramientas de macOS.
+Las pruebas del constructor de Windows requieren `makensis`; las pruebas de recreación del lanzador utilizan las herramientas de macOS.
 
 Las mejoras de 1.7.1 incluyen comprobación de cambios simultáneos, conservación del ejemplar firmado, protección del importe ya cobrado, redondeo decimal y preparación verificada de copias y restauraciones. Los instaladores de Mac se probaron con arranques nuevos y actualización desde datos ficticios de 1.7.0.
 
@@ -72,8 +72,21 @@ El flujo [Windows x64](.github/workflows/windows.yml) de GitHub Actions ejecuta 
 - actualización desde una base 1.7.0 con contratos firmados;
 - antivirus de Windows con protección en tiempo real encendida, con ocho actualizaciones seguidas;
 - cuentas estándar sin administrador, incluida una con tildes, eñe y espacio (`C:\Users\José Peña`);
-- pantallas al 100 %, 125 % y 150 % comprobando que ningún botón quede cortado;
+- pantallas al 100 %, 125 % y 150 % comprobando que ningún botón ni opción del menú lateral quede cortado;
 - las pruebas con Python 3.12, 3.13, 3.14 y con el Python incluido en el instalador, más `Iniciar.bat` y `Crear_EXE.bat`.
+
+### Cambios de 1.8.0 (instalador de Windows 1.8.0; el de Mac sigue en 1.7.1)
+
+- «Imprimir» pregunta si el contrato se abre en Word (.docx) o en PDF (en el navegador). Ambos se generan solo con la biblioteca estándar, a partir del mismo documento que se firma; si el equipo no tiene Word, esa opción aparece desactivada.
+- El contrato ya no se imprime solo. Hasta la 1.7.2 la página guardada lanzaba la impresión al cargarse: cada clic en «Imprimir» y cada pestaña restaurada o recargada por el navegador sacaba otra copia. Al arrancar, el programa quita esa impresión automática de los contratos `.html` que dejaron versiones anteriores, y tras abrir el contrato la pantalla dice dónde se abrió.
+- Las firmas con nombre se achican según el largo del nombre y pueden pasar a otro renglón: ya no se salen de la hoja (ni hacen que el navegador achique toda la página), tampoco en contratos firmados antes.
+- «Contratos» está en el menú lateral, debajo de Áreas, con las pestañas Por firmar y Firmados y todas sus acciones (firmar, imprimir, datos del contrato, registrar inicio, deshacer). Ya no hay botón «Ver asignaciones»: al confirmar una asignación se abre Contratos con ella elegida. En pantallas bajas (1366×768) las opciones del menú se acercan para que entren todas.
+- Fichas más cortas: la de la trabajadora ya no tiene la sección «Estado» (estado y notas) y la del cliente ya no pide «¿Para cuándo la necesita?» ni «Notas». El estado de la trabajadora lo pone el programa según sus asignaciones y se sigue viendo en la lista. Lo ya escrito en esos campos se conserva en la base y en las copias .csv, y una base nueva mantiene las mismas columnas. Una trabajadora que estuviera «No disponible» (solo se podía poner a mano) pasa al estado de sus asignaciones, para que no quede fuera de las listas sin forma de volver.
+- Un sueldo escrito «1.500» se entiende como mil quinientos.
+- Si una ficha ya guardada tiene un dato inválido, al salir se dice cuál y se ofrece volver a lo guardado (antes ni la X cerraba el programa).
+- La carpeta adicional de copias solo se usa si es la elegida: no se escriben datos en otro USB que tome su letra, y uno desconectado no avisa en cada arranque. Al traer datos de la versión portable también se trae esa carpeta.
+- La versión se ve en el menú lateral y en `errores.log`; los constructores la toman de `agencia.py`.
+- Instalador de Windows: un archivo que no se pudo escribir ya no se puede «Omitir», cualquier error al copiar deja la versión anterior, el aviso no dice «no se modificó nada» si no pudo volver atrás, y un instalador más viejo advierte antes de reemplazar uno más nuevo.
 
 ### Cambios de Windows 1.7.2
 

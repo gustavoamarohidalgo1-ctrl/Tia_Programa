@@ -8,7 +8,8 @@ CONSTRUCCION="$RAIZ/instaladores/construccion"
 SALIDA="$RAIZ/instaladores"
 TRABAJO="$(mktemp -d "${TMPDIR:-/tmp}/agencia-instalador-mac.XXXXXX")"    # carpeta temporal de trabajo (se puede borrar)
 NOMBRE="Agencia de Empleos"
-VERSION="${VERSION:-1.7.1}"
+VERSION="${VERSION:-$(sed -n 's/^VERSION = "\([0-9.]*\)".*/\1/p' "$RAIZ/agencia.py")}"   # la de agencia.py
+[ -n "$VERSION" ] || { echo "No se encontro VERSION en agencia.py."; exit 1; }
 trap 'codigo=$?; if [ "$codigo" -eq 0 ]; then rm -rf "$TRABAJO"; else echo "Construccion fallida. Archivos conservados en: $TRABAJO" >&2; fi' EXIT
 DMG="$SALIDA/Agencia-de-Empleos-Mac-arm64.dmg"
 

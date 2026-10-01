@@ -11,7 +11,8 @@ AQUI="$RAIZ/instaladores/construccion"
 SALIDA="$RAIZ/instaladores/Agencia-de-Empleos-Windows-x64.exe"
 TRABAJO="$(mktemp -d "${TMPDIR:-/tmp}/agencia-instalador-windows.XXXXXX")"
 CACHE="${TMPDIR:-/tmp}/agencia-instalador-descargas"
-VERSION="${VERSION:-1.7.2}"
+VERSION="${VERSION:-$(sed -n 's/^VERSION = "\([0-9.]*\)".*/\1/p' "$RAIZ/agencia.py")}"   # la de agencia.py
+[ -n "$VERSION" ] || { echo "No se encontro VERSION en agencia.py."; exit 1; }
 trap 'codigo=$?; if [ "$codigo" -eq 0 ]; then rm -rf "$TRABAJO"; else echo "Construccion fallida. Archivos conservados en: $TRABAJO" >&2; fi' EXIT
 PYVER="3.12.10"     # ultima 3.12 con binarios para Windows
 
@@ -92,9 +93,10 @@ APP="$TRABAJO/aplicacion"
 rm -rf "$APP" && mkdir -p "$APP"
 cp "$RAIZ/agencia.py" "$RAIZ/logo.png" "$RAIZ/icono.png" "$RAIZ/icono.ico" "$AQUI/iniciar.pyw" "$APP/"
 if [ -n "$PY312" ]; then
-  "$PY312" -m compileall -q -f --invalidation-mode unchecked-hash "$R/Lib" >/dev/null
+  # -s: los .pyc no guardan la carpeta temporal de este equipo, solo la ruta dentro del programa
+  "$PY312" -m compileall -q -f -s "$R" --invalidation-mode unchecked-hash "$R/Lib" >/dev/null
   # El programa, con huella comprobada: si alguna vez se reemplaza app\agencia.py a mano, Python usa el nuevo.
-  "$PY312" -m compileall -q -f --invalidation-mode checked-hash "$APP/agencia.py" >/dev/null
+  "$PY312" -m compileall -q -f -s "$APP" --invalidation-mode checked-hash "$APP/agencia.py" >/dev/null
   echo "Precompilado con $("$PY312" -V): $(find "$R/Lib" "$APP" -name '*.pyc' | wc -l | tr -d ' ') archivos"
 else
   echo "AVISO: no hay Python 3.12 para precompilar; el instalador funciona igual pero abrira mas lento."

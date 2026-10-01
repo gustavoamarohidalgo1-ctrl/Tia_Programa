@@ -1,4 +1,5 @@
 """Regresiones de listas reutilizadas sobre SQLite y Tk reales con datos ficticios."""
+import os
 import tempfile
 import sqlite3
 import unittest
@@ -6,6 +7,9 @@ from contextlib import ExitStack
 from datetime import timedelta
 from pathlib import Path
 from unittest import mock
+
+if not os.environ.get("AGENCIA_DATOS"):      # nunca la carpeta de datos real, aunque se pruebe desde el proyecto
+    os.environ["AGENCIA_DATOS"] = tempfile.mkdtemp(prefix="agencia-pruebas-")
 
 import agencia
 

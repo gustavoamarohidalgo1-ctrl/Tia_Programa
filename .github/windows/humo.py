@@ -162,6 +162,14 @@ def main():
         for pagina in app.menu:
             app.mostrar(pagina)
             root.update()
+        lateral = app.lateral
+        anotar(f"Menú lateral: alto {lateral.winfo_height()}, espacio de cada opción {lateral.relleno}")
+        for pagina, item in lateral.items.items():   # todas las opciones enteras, sin pisar la versión
+            if (not item.winfo_ismapped() or item.winfo_height() < item.winfo_reqheight()
+                    or item.winfo_rooty() + item.winfo_height() > lateral.version.winfo_rooty()):
+                fallo(f"Menú lateral: «{pagina.titulo_pagina}» queda cortado "
+                      f"(y={item.winfo_rooty() - lateral.winfo_rooty()}, alto {item.winfo_height()}, "
+                      f"versión en {lateral.version.winfo_rooty() - lateral.winfo_rooty()})")
 
     @paso("registrar cliente")
     def cliente():
@@ -186,11 +194,12 @@ def main():
                 valor = valor_campo(campo)
                 if valor is not None:
                     app.trabajadoras.form.poner_valor(campo[0], valor)
-        app.trabajadoras.form.poner_valor("estado", "Disponible")
         app.trabajadoras.guardar(silencioso=True)
         root.update()
         if not app.db.todos("trabajadoras"):
             raise AssertionError("La trabajadora no se guardó")
+        if app.db.todos("trabajadoras")[0]["estado"] != "Disponible":      # el estado lo pone el programa
+            raise AssertionError(f"Trabajadora nueva con estado {app.db.todos('trabajadoras')[0]['estado']!r}")
 
     @paso("asignar y generar contrato")
     def asignar():
@@ -202,7 +211,7 @@ def main():
                 "fecha_enlace": time.strftime("%d/%m/%Y"), "estado": "Activa", "comision": "300.00",
                 "sueldo_acordado": "1200", "garantia": "Sí", "meses_garantia": "2"})
         app.refrescar_todo()
-        app.abrir_asignaciones(nuevo)
+        app.abrir_contratos(nuevo)
         root.update()
         c = app.db.uno("colocaciones", nuevo)
         documento = agencia.html_contrato(c, cli, tra)
@@ -258,11 +267,24 @@ def main():
             raise AssertionError("restaurar_copia devolvió False")
         root.update()
 
-    @paso("imprimir contrato (abre navegador)")
+    @paso("imprimir contrato (Word y PDF)")
     def imprimir():
+        import zipfile
         c = app.db.todos("colocaciones")[0]
+        # En la ventana «Imprimir contrato» se elige Word (las máquinas de prueba no tienen Word: se revisa el .docx)…
+        agencia.elegir_impresion = lambda master, numero: "word"
         app.contratos.imprimir_contrato(c)
         root.update()
+        with zipfile.ZipFile(os.path.join(agencia.CARPETA_CONTRATOS, f"contrato_{c['id']}.docx")) as documento:
+            if "CONTRATO DE TRABAJO" not in documento.read("word/document.xml").decode("utf-8"):
+                raise AssertionError("El documento de Word no tiene el contrato")
+        agencia.elegir_impresion = lambda master, numero: "pdf"     # …y después PDF
+        app.contratos.imprimir_contrato(c)
+        root.update()
+        with open(os.path.join(agencia.CARPETA_CONTRATOS, f"contrato_{c['id']}.pdf"), "rb") as archivo:
+            pdf = archivo.read()
+        if not pdf.startswith(b"%PDF-") or b"/Count 2" not in pdf:
+            raise AssertionError("El PDF del contrato no tiene sus dos hojas")
 
     @paso("ventanas de diálogo completas (nada cortado)")
     def dialogos():
@@ -272,6 +294,7 @@ def main():
         captura("principal")
         for nombre, abrir in (("Datos del contrato", lambda: app.contratos.editar_datos(c)),
                               ("Firmas", lambda: agencia.DialogoFirmas(app.contratos, c, cli, tra, lambda f: True)),
+                              ("Imprimir", lambda: agencia.DialogoImprimir(app.contratos, c["id"], True)),
                               ("Áreas", lambda: agencia.DialogoAreas(root, app)),
                               ("Copias de seguridad", lambda: agencia.DialogoCopias(root, app))):
             antes = set(root.winfo_children())

@@ -7,6 +7,7 @@ Unicode true
 SetCompressor /SOLID lzma
 ManifestSupportedOS all    ; que Windows 8.1, 10 y 11 se reconozcan por su versión real
 ManifestDPIAware true      ; texto nítido en pantallas con escala 125 % o 150 %
+AllowSkipFiles off         ; un archivo que no se pudo escribir no se puede «Omitir»: se reintenta o se cancela
 
 !define NOMBRE "Agencia de Empleos"
 !define CLAVE_DESINSTALAR "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenciaDeEmpleos"
@@ -35,6 +36,7 @@ VIAddVersionKey /LANG=1034 "Comments" "Instala ${NOMBRE} solo para el usuario ac
 VIFileVersion "${VERSION}.0"
 
 !include "MUI2.nsh"
+!include "WordFunc.nsh"    ; VersionCompare (instrucciones de NSIS, sin complementos)
 !include "${RAIZ}\instaladores\construccion\archivos_en_uso.nsh"
 !define MUI_ICON "${ICONO}"
 !define MUI_UNICON "${ICONO}"
@@ -61,6 +63,18 @@ FunctionEnd
 Section "Instalar"
   Call ComprobarArchivosEnUso
   Call ComprobarDatosHeredados
+
+  ; Un instalador viejo (por ejemplo, uno anterior que siga en el chat) no reemplaza sin avisar a uno más nuevo.
+  ReadRegStr $R0 HKCU "${CLAVE_DESINSTALAR}" "DisplayVersion"
+  ${If} $R0 != ""
+    ${VersionCompare} "$R0" "${VERSION}" $R1
+    ${If} $R1 == 1
+    ${AndIf} ${Cmd} `MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "Ya está instalada la versión $R0 de ${NOMBRE}, más nueva que esta (${VERSION}).$\r$\n$\r$\n¿Instalar de todos modos esta versión anterior? Sus datos se conservan." /SD IDNO IDNO`
+      SetErrorLevel 6
+      Abort
+    ${EndIf}
+  ${EndIf}
+
   StrCpy $RuntimeAnterior 0
   StrCpy $AppAnterior 0
   StrCpy $DesinstaladorAnterior 0
@@ -96,11 +110,15 @@ Section "Instalar"
   ; 2) Escribir la versión nueva en su lugar. Si algo falla aquí, .onInstFailed o el bloque de abajo
   ;    devuelven la versión anterior.
   StrCpy $Extrayendo 1
+  ClearErrors
   SetOutPath "$INSTDIR\runtime"
   File /r "${RUNTIME}\*"
   SetOutPath "$INSTDIR\app"
   File /r "${APLICACION}\*"
   SetOutPath "$INSTDIR"
+  ${If} ${Errors}               ; algún archivo no se escribió (antivirus, disco lleno): no se da por instalado
+    Goto extraccion_incompleta
+  ${EndIf}
   ${IfNot} ${FileExists} "$INSTDIR\runtime\pythonw.exe"
   ${OrIfNot} ${FileExists} "$INSTDIR\runtime\python312.dll"
   ${OrIfNot} ${FileExists} "$INSTDIR\runtime\DLLs\_tkinter.pyd"
@@ -145,14 +163,21 @@ Section "Instalar"
     ; Nada nuevo se escribió todavía: devolver lo que alcanzó a moverse.
     StrCpy $Extrayendo 0
     Call RestaurarVersionAnterior
+    StrCmp $0 1 0 sin_volver_atras
     MessageBox MB_OK|MB_ICONEXCLAMATION "Windows no permitió reemplazar los archivos de la versión instalada de ${NOMBRE}. Puede que el programa siga abierto o que el antivirus los esté revisando.$\r$\n$\r$\nCierre el programa, espere un minuto y vuelva a abrir el instalador. No se modificó nada y sus datos están a salvo." /SD IDOK
     SetErrorLevel 3
     Abort
   extraccion_incompleta:
     Call RestaurarVersionAnterior
     StrCpy $Extrayendo 0
+    StrCmp $0 1 0 sin_volver_atras
     MessageBox MB_OK|MB_ICONSTOP "No se pudieron escribir todos los archivos de ${NOMBRE} (¿disco lleno o antivirus?). Se dejó la instalación como estaba y sus datos están a salvo.$\r$\n$\r$\nVuelva a intentarlo en unos minutos." /SD IDOK
     SetErrorLevel 3
+    Abort
+  sin_volver_atras:
+    ; Ni la versión nueva quedó completa ni se pudo devolver la anterior: decirlo, sin prometer lo que no pasó.
+    MessageBox MB_OK|MB_ICONSTOP "No se pudo terminar la instalación de ${NOMBRE} ni devolver la versión anterior (¿antivirus?).$\r$\n$\r$\nSus datos están a salvo. Espere unos minutos y vuelva a abrir este instalador: completará la instalación." /SD IDOK
+    SetErrorLevel 5
     Abort
   instalacion_terminada:
 SectionEnd
@@ -160,7 +185,7 @@ SectionEnd
 Section "Uninstall"
   Call un.ComprobarArchivosEnUso
   Call un.ComprobarDatosHeredados
-  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "¿Desea borrar también los DATOS de la agencia (clientes, trabajadoras, contratos y respaldos)?$\r$\n$\r$\nEsta acción NO se puede deshacer.$\r$\n$\r$\nSi solo quiere reinstalar o actualizar el programa, elija No." /SD IDNO IDNO conservar_datos
+  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "¿Desea borrar también los DATOS de la agencia en esta computadora (clientes, trabajadoras, contratos y sus copias)?$\r$\n$\r$\nEsta acción NO se puede deshacer. Las copias en Documentos\Respaldos ${NOMBRE} y en la carpeta adicional no se borran: si la computadora cambia de dueño, bórrelas a mano.$\r$\n$\r$\nSi solo quiere reinstalar o actualizar el programa, elija No." /SD IDNO IDNO conservar_datos
     Call un.ComprobarArchivosEnUso
     RMDir /r "${DATOS}"
   conservar_datos:

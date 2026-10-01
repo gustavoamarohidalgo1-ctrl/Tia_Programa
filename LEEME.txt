@@ -1,6 +1,6 @@
 AGENCIA DE EMPLEOS "SERVICIO EXCLUSIVO" - Programa para Windows
 ================================================================
-Version de distribucion: Windows 1.7.2 - Mac 1.7.1.
+Version de distribucion: Windows 1.8.0 - Mac 1.7.1.
 
 INSTALAR EN WINDOWS (recomendado, no hace falta instalar Python)
   1. Descargue instaladores\Agencia-de-Empleos-Windows-x64.exe
@@ -49,9 +49,14 @@ SEGURIDAD DE LOS DATOS
   - Lo que escribe se GUARDA SOLO al pasar a otro registro, cambiar de seccion o
     cerrar el programa, sin avisos. Si a un registro nuevo le faltan datos
     obligatorios, queda como borrador y reaparece al pulsar "Nuevo" (incluso
-    al abrir el programa otra vez). Si la base se dana o desaparece, la
-    recupera de las copias.
-  Consejo: elija tambien una carpeta adicional en un USB o en OneDrive.
+    al abrir el programa otra vez). Si en un registro ya guardado falta un dato
+    obligatorio, el programa dice cual y ofrece volver a lo guardado. Si la
+    base se dana o desaparece, la recupera de las copias.
+  Consejo: elija tambien una carpeta adicional en un USB o en OneDrive. El
+  programa solo copia en la carpeta que se eligio (la marca con un archivo
+  .copias-agencia): si el USB no esta conectado, copia cuando vuelva a estarlo,
+  y nunca en otro USB que tome la misma letra.
+  La version del programa aparece abajo en el menu lateral.
 
 INSTALADORES (carpeta "instaladores")
   Agencia-de-Empleos-Mac-arm64.dmg      Mac con chip Apple (M1 o posterior).
@@ -78,21 +83,26 @@ INSTALADORES (carpeta "instaladores")
 SECCIONES
   Clientes      Nuevo cliente y cuestionario del pedido (sueldo, zona,
                 servicio, horario...). Pestana
-                "Clientes registrados" para ver y editar.
+                "Clientes registrados" para ver y editar. Un sueldo escrito
+                1.500 se entiende como mil quinientos (igual que 1,500 o 1500).
                 "Tipo de servicio" (y "Especialidad" de la trabajadora): se puede
                 escribir y sugiere mientras se escribe, o abrir la lista con la flecha.
-  Trabajadoras  Perfil y documentos.
+  Trabajadoras  Perfil y documentos. El estado (Disponible, En proceso,
+                Trabajando) lo pone el programa segun sus asignaciones y se ve
+                en la lista "Trabajadoras registradas".
   Areas         Un cuadro por area (Nineras, Cama adentro...). Con "Nueva area" y
                 "Eliminar area..." la agencia crea o quita sus propias areas: aparecen
                 tambien en "Tipo de servicio" del cliente y en "Especialidad" de la
                 trabajadora. Solo se elimina un area sin clientes ni trabajadoras.
                 Dentro de un area:
                 elija el cliente y la trabajadora, y pulse Asignar.
-                Revise los datos del contrato y confirme la asignacion.
-                Luego puede firmar, imprimir o deshacer desde Asignaciones.
-                Al firmar el contrato, el trabajo y la garantia empiezan
-                solos desde la fecha del contrato. Use "Ver asignaciones" para abrir
-                contratos anteriores, incluidos los ya firmados.
+                Revise los datos del contrato y confirme la asignacion: se abre
+                Contratos con la nueva asignacion elegida.
+  Contratos     En el menu lateral, debajo de Areas. Pestanas "Por firmar" y
+                "Firmados" (alli estan los contratos anteriores). Elija una
+                asignacion para firmar, imprimir, corregir los datos del contrato,
+                registrar el inicio o deshacerla. Al firmar el contrato, el
+                trabajo y la garantia empiezan solos desde la fecha del contrato.
   Comisiones    Por cobrar, cobrado y cobrado este mes. La comision puede ser un
                 monto o un PORCENTAJE del sueldo (20%, 12.5%...): al preparar el
                 contrato se escribe uno y el otro se calcula solo. El contrato
@@ -116,12 +126,25 @@ NOTA SOBRE LA FIRMA
   en el contrato. Use esta opcion solo cuando la persona acepte firmar asi.
   No es una firma digital certificada (con certificado electronico).
 
+IMPRIMIR CONTRATOS
+  "Imprimir" abre una ventana para elegir como abrir el contrato:
+  - Word: archivo .docx, hoja A4 con letra de tamano fijo. Imprimalo con
+    Archivo > Imprimir. Si el equipo no tiene Word, esta opcion aparece
+    desactivada.
+  - PDF: se abre en el navegador (Edge en Windows). Imprimalo con el boton de
+    la impresora o con Ctrl+P.
+  Los archivos quedan en la carpeta contratos (contrato_N.docx o contrato_N.pdf).
+  El contrato NUNCA se imprime solo: se abre y usted lo imprime una vez. La
+  pantalla de Contratos confirma donde se abrio; si no lo ve, busquelo en la
+  barra de tareas en vez de pulsar Imprimir otra vez. (Hasta la 1.7.2 se
+  imprimia solo cada vez que se abria o el navegador recargaba la pagina.)
+
 DATOS
   agencia.db  -> toda la informacion (haga copias de seguridad de este archivo)
   logo.png    -> logo del menu lateral (dejelo en esta carpeta)
   icono.png / icono.ico / icono.icns -> icono de la aplicacion (ventana, barra de
                  tareas, Dock). Dejelos en esta carpeta; el .exe usa icono.ico.
-  contratos\  -> contratos generados
+  contratos\  -> contratos generados (Word .docx; PDF si no hay Word)
 
 AJUSTES (al inicio de agencia.py)
   AGENCIA_NOMBRE, AGENCIA_ESLOGAN, AGENCIA_RUC, AGENCIA_DOMICILIO,
@@ -129,7 +152,7 @@ AJUSTES (al inicio de agencia.py)
   PORCENTAJE_DEFECTO (por ejemplo 20 para proponer el 20% del sueldo; None = usar
   el monto) y MESES_GARANTIA (2, los meses que se proponen por defecto).
 
-ACTUALIZAR CON SEGURIDAD (WINDOWS 1.7.2)
+ACTUALIZAR CON SEGURIDAD (WINDOWS 1.8.0)
   Guarde su trabajo y cierre el programa antes de actualizarlo en Mac o Windows.
   Windows comprueba si los archivos estan en uso y no actualiza mientras haya
   una instancia abierta. Dos instaladores no pueden ejecutarse a la vez.

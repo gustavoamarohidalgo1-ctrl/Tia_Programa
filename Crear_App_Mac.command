@@ -86,11 +86,13 @@ try:
                       'AQUI="$(cd "$(dirname "$0")" && pwd)"\n'
                       'exec "$AQUI/python" "$AQUI/../../../agencia.py" "$@"\n')
     os.chmod(lanzador, 0o755)
+    with open(os.path.join(carpeta, "agencia.py"), encoding="utf-8") as fuente:
+        version = re.search(r'^VERSION = "([0-9.]+)"', fuente.read(), re.M).group(1)    # la del programa
     with open(os.path.join(nueva, "Contents", "Info.plist"), "wb") as archivo:
         plistlib.dump({"CFBundleName": "Agencia de Empleos", "CFBundleDisplayName": "Agencia de Empleos",
                        "CFBundleExecutable": "Agencia", "CFBundleIdentifier": "pe.servicioexclusivo.agencia",
                        "CFBundleIconFile": "icono", "CFBundlePackageType": "APPL",
-                       "CFBundleVersion": "1.7.1", "CFBundleShortVersionString": "1.7.1",
+                       "CFBundleVersion": version, "CFBundleShortVersionString": version,
                        "NSHighResolutionCapable": True, "LSMinimumSystemVersion": minimo}, archivo)
     comprobar_app_cerrada()
     if os.path.exists(app):

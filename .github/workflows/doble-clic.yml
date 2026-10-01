@@ -12,6 +12,9 @@ on:
       - '.github/workflows/doble-clic.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read     # la prueba solo lee el repositorio
+
 concurrency:
   group: doble-clic-${{ github.sha }}
   cancel-in-progress: true

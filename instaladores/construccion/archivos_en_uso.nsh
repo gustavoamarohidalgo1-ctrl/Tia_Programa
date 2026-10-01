@@ -246,5 +246,8 @@ Function .onInstFailed
   ; La instalacion se detuvo mientras escribia la version nueva: volver a dejar la anterior como estaba.
   ${If} $Extrayendo == 1
     Call RestaurarVersionAnterior
+    ${If} $0 != 1   ; no prometer lo que no paso: la proxima vez el instalador completa o deshace el cambio
+      MessageBox MB_OK|MB_ICONSTOP "No se pudo devolver la version anterior de ${NOMBRE} (antivirus?).$\r$\n$\r$\nSus datos estan a salvo. Espere unos minutos y vuelva a abrir este instalador: completara la instalacion." /SD IDOK
+    ${EndIf}
   ${EndIf}
 FunctionEnd

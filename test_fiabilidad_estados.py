@@ -1,4 +1,5 @@
 """Estados y vínculos de negocio con SQLite temporal; no abre ventanas ni datos reales."""
+import os
 import sqlite3
 import tempfile
 import threading
@@ -8,6 +9,9 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+if not os.environ.get("AGENCIA_DATOS"):      # nunca la carpeta de datos real, aunque se pruebe desde el proyecto
+    os.environ["AGENCIA_DATOS"] = tempfile.mkdtemp(prefix="agencia-pruebas-")
 
 import agencia
 
@@ -331,14 +335,29 @@ class FiabilidadEstadosTest(unittest.TestCase):
         self.assertEqual(len(barridos), 1)
         self.assertTrue(all(c["estado"] == "Activa" for c in self.db.todos("colocaciones")))
 
-    def test_formulario_no_permite_disponibilidad_con_vinculo_activo(self):
+    def test_la_ficha_no_pide_estado_y_editarla_conserva_el_de_sus_asignaciones(self):
         cli, t = self.cliente("Colocado"), self.trabajadora("Trabajando")
         self.enlace(cli, t, estado="Activa")
+        self.assertNotIn("estado", agencia.claves(agencia.CAMPOS_TRABAJADORA))     # lo pone el programa
+        self.assertIn("estado", agencia.claves(agencia.TABLAS["trabajadoras"]))    # y se sigue guardando
         pagina = agencia.PaginaTrabajadoras.__new__(agencia.PaginaTrabajadoras)
         pagina.app, pagina.db, pagina.id_actual = self.app, self.db, t
-        for estado in ("Disponible", "No disponible", "En proceso"):
-            self.assertIn("asignación", pagina.validar_extra({"estado": estado}))
-        self.assertIsNone(pagina.validar_extra({"estado": "Trabajando"}))
+        self.assertIsNone(pagina.validar_extra({"zona": "Comas"}))                 # su perfil se corrige sin trabas
+        self.assertEqual(self.estado("trabajadoras", t), "Trabajando")
+
+    def test_no_disponible_de_antes_vuelve_al_estado_de_sus_asignaciones(self):
+        # «No disponible» solo se ponía a mano en la ficha: sin ese campo nadie debe quedar fuera para siempre.
+        libre = self.trabajadora("No disponible")
+        cli, firmada = self.cliente("En entrevista"), self.trabajadora("No disponible")
+        enlace = self.enlace(cli, firmada, contrato_firmado="1")
+        otra = self.trabajadora("Disponible")
+        self.app.liberar_no_disponibles()
+        self.assertEqual(self.estado("trabajadoras", libre), "Disponible")
+        self.assertEqual(self.estado("trabajadoras", firmada), "En proceso")
+        self.assertEqual(self.estado("trabajadoras", otra), "Disponible")
+        self.app.iniciar_contratos_firmados()                                     # su contrato firmado ya empieza
+        self.assertEqual(self.fila(enlace)["estado"], "Activa")
+        self.assertEqual(self.estado("trabajadoras", firmada), "Trabajando")
 
     def test_inicio_incorpora_firma_externa_entre_lectura_y_reserva(self):
         personas = [(self.cliente("En entrevista"), self.trabajadora("En proceso")) for _ in range(2)]
@@ -382,7 +401,7 @@ class FiabilidadEstadosTest(unittest.TestCase):
                                  elegidos=lambda: (self.db.uno("clientes", cli), self.db.uno("trabajadoras", t)),
                                  after_idle=Mock())
         self.app.refrescar_todo = Mock()
-        self.app.abrir_asignaciones = Mock()
+        self.app.abrir_contratos = Mock()
         with patch.object(agencia, "DialogoContrato") as dialogo:
             agencia.PaginaEnlazar.asignar(pagina)
         valores, confirmar = dialogo.call_args.args[2:4]

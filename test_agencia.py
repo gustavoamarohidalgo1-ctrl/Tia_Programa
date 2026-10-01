@@ -1,24 +1,32 @@
 """Pruebas de operaciones que deben conservar los datos aun si algo falla."""
 
+import io
 import json
 import os
+import re as re_mod
 import struct
 import sys
 import sqlite3
 import tempfile
 import threading
 import unittest
+import zipfile
 from datetime import date, datetime, timedelta
 from unittest import mock
+from xml.etree import ElementTree
 from pathlib import Path
 from contextlib import closing
 
+if not os.environ.get("AGENCIA_DATOS"):      # nunca la carpeta de datos real, aunque se pruebe desde el proyecto
+    os.environ["AGENCIA_DATOS"] = tempfile.mkdtemp(prefix="agencia-pruebas-")
+
 import agencia
 from agencia import (BaseDatos, area_de_texto, filtrar_opciones, sin_acentos, sinonimos_de_area, cargar_areas, restablecer_areas, base_sana, buscar_restauracion, carpetas_externas, con_garantia, contar_datos,
-                     copia_externa, copiar_base, datos_contrato, hay_datos, html_contrato, html_firma,
+                     copia_externa, copiar_base, datos_contrato, docx_contrato, hay_datos, html_contrato, html_firma,
                      inicio_por_firma, leer_configuracion, guardar_configuracion, leer_fecha, leer_numero,
                      esquema_desactualizado, listar_copias, meses_de_garantia, meses_del_cliente, numero_en_letras, texto_meses, podar_respaldos, monto_por_porcentaje, porcentaje_de, porcentaje_en_letras, registrar_error,
-                     respaldar, restaurar_si_esta_danada, resumen_ganancias, situacion_garantia, sumar_meses)
+                     respaldar, restaurar_si_esta_danada, resumen_ganancias, situacion_garantia, sumar_meses,
+                     tamano_firma)
 
 
 class LotesDeBaseDatos(unittest.TestCase):
@@ -67,6 +75,16 @@ class FirmasEnContrato(unittest.TestCase):
     def test_nombre_se_escapa_al_imprimir(self):
         nombre = json.dumps({"tipo": "nombre", "texto": "Ana <López> & Sol"})
         self.assertIn("Ana &lt;López&gt; &amp; Sol", html_firma(nombre))
+
+    def test_firma_con_nombre_largo_cabe_en_su_recuadro(self):
+        # El recuadro mide unos 226 pt: con la letra más ancha (Segoe Script, ~0.6 em por letra) el nombre ocupa
+        # como mucho 200 pt; el que no cabe ni a 9 pt pasa a otro renglón.
+        for nombre in ("Ana", "Ricardo Torres Gamarra", "María Fernanda Rodríguez Villanueva",
+                       "María del Carmen Rodríguez de la Villanueva Castañeda"):
+            tamano = tamano_firma(nombre)
+            self.assertTrue(9 <= tamano <= 16, nombre)
+            self.assertTrue(tamano == 9 or 0.6 * len(nombre) * tamano <= 200, nombre)
+            self.assertIn(f'style="font-size:{tamano}pt"', html_firma(json.dumps({"tipo": "nombre", "texto": nombre})))
 
 
 class Ganancias(unittest.TestCase):
@@ -194,6 +212,37 @@ class SituacionDeGarantia(unittest.TestCase):
         self.assertEqual(situacion_garantia(self.enlace(estado="Reemplazo solicitado"), {"1"}),
                          ("Reemplazada", False))
 
+    def test_el_ultimo_dia_sigue_pendiente_y_una_cancelada_no_figura_como_cumplida(self):
+        self.assertEqual(situacion_garantia(self.enlace(fin_garantia=date.today().strftime("%d/%m/%Y")), set()),
+                         ("Vence hoy", True))
+        self.assertEqual(situacion_garantia(self.enlace(estado="Cancelada"), set()), ("Cancelada", False))
+
+
+class CierreDeGarantias(unittest.TestCase):
+    """La garantía cubre también su último día: se da por cumplida recién al día siguiente."""
+
+    def setUp(self):
+        temporal = tempfile.TemporaryDirectory()
+        self.addCleanup(temporal.cleanup)
+        self.db = BaseDatos(str(Path(temporal.name) / "agencia.db"))
+        self.addCleanup(self.db.con.close)
+        self.app = agencia.App.__new__(agencia.App)
+        self.app.db, self.app._reemplazos = self.db, (-1, {})
+
+    def colocacion(self, fin):
+        cli = self.db.insertar("clientes", {"nombre": "Cliente ficticio", "estado": "Colocado"})
+        t = self.db.insertar("trabajadoras", {"nombre": "Trabajadora ficticia", "estado": "Trabajando"})
+        return self.db.insertar("colocaciones", {"cliente_id": str(cli), "trabajadora_id": str(t), "estado": "Activa",
+                                                 "garantia": "Sí", "meses_garantia": "2", "fin_garantia": fin})
+
+    def test_la_garantia_se_cierra_recien_despues_de_su_ultimo_dia(self):
+        hoy_ = date.today()
+        ultimo_dia = self.colocacion(hoy_.strftime("%d/%m/%Y"))
+        vencida = self.colocacion((hoy_ - timedelta(days=1)).strftime("%d/%m/%Y"))
+        self.app.cerrar_garantias_vencidas()
+        self.assertEqual(self.db.uno("colocaciones", ultimo_dia)["estado"], "Activa")
+        self.assertEqual(self.db.uno("colocaciones", vencida)["estado"], "Garantía cumplida")
+
 
 class FechasYGarantia(unittest.TestCase):
     def test_sumar_meses_respeta_fin_de_mes_y_bisiestos(self):
@@ -245,9 +294,211 @@ class ContratoImpreso(unittest.TestCase):
         self.assertIn("sin garantía", pagina)
         self.assertEqual(datos_contrato(dict(self.c, garantia="No"), self.cli)["meses_garantia"], "0")
 
-    def test_imprimir_agrega_el_disparo_de_impresion_solo_si_se_pide(self):
-        self.assertNotIn("window.print()</script>", html_contrato(self.c, self.cli, self.t))
-        self.assertIn("window.print()", html_contrato(self.c, self.cli, self.t, imprimir=True))
+    def test_un_sueldo_escrito_1_500_es_mil_quinientos(self):
+        casos = {"1.500": "1500", "S/ 2.300": "2300", "1500": "1500", "1,500.50": "1,500.50", "1.5": "1.5",
+                 "1.50": "1.50", "0.500": "0.500", "12.500,00": "12.500,00", "": "", None: ""}
+        for escrito, esperado in casos.items():
+            self.assertEqual(agencia.normalizar_sueldo(escrito), esperado, escrito)
+        pagina = html_contrato(dict(self.c, sueldo_acordado="1.500", comision="300.00"), self.cli, self.t)
+        self.assertIn("S/ 1,500.00", pagina)                    # antes salía «S/ 1.50» y «20000 por ciento»
+        self.assertIn("veinte por ciento (20 %)", pagina)
+
+    def test_el_contrato_nunca_se_imprime_solo(self):
+        # Se imprimía al cargarse: cada pestaña restaurada o recargada, y cada clic, sacaba otra copia.
+        for c in (self.c, dict(self.c, contrato_firmado="1", contrato_html=html_contrato(self.c, self.cli, self.t))):
+            pagina = html_contrato(c, self.cli, self.t)
+            self.assertIn('<button onclick="window.print()">Imprimir</button>', pagina)   # solo a pedido
+            self.assertNotIn("window.onload", pagina)
+            self.assertNotIn("setTimeout", pagina)
+
+    def test_los_contratos_viejos_dejan_de_imprimirse_solos(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            viejo, otro = Path(carpeta) / "contrato_3.html", Path(carpeta) / "notas.txt"
+            viejo.write_text(html_contrato(self.c, self.cli, self.t).replace(
+                "</head>", agencia._IMPRESION_AUTOMATICA + "</head>"), encoding="utf-8")
+            otro.write_text(agencia._IMPRESION_AUTOMATICA, encoding="utf-8")            # no es un contrato: no se toca
+            self.assertEqual(agencia.quitar_impresion_automatica(carpeta), 1)
+            self.assertNotIn(agencia._IMPRESION_AUTOMATICA, viejo.read_text(encoding="utf-8"))
+            self.assertIn("CONTRATO DE TRABAJO", viejo.read_text(encoding="utf-8"))
+            self.assertEqual(otro.read_text(encoding="utf-8"), agencia._IMPRESION_AUTOMATICA)
+            self.assertEqual(agencia.quitar_impresion_automatica(carpeta), 0)            # ya no queda nada
+        self.assertEqual(agencia.quitar_impresion_automatica("/no/existe"), 0)
+
+    def test_contrato_firmado_antes_muestra_las_firmas_con_el_tamano_actual(self):
+        largo, corto = "María del Carmen Rodríguez de la Villanueva", "Rosa Sol"
+        c = dict(self.c, contrato_firmado="1", fecha_firma="28/09/2026 19:27",
+                 firma_cliente=json.dumps({"tipo": "nombre", "texto": largo}),
+                 firma_trabajadora=json.dumps({"tipo": "nombre", "texto": corto}))
+        actual = html_contrato(c, self.cli, self.t)
+        regla = actual.split(".nombre-firma {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("nowrap", regla)       # un nombre que no cabe pasa a otro renglón en vez de salirse
+        # El mismo contrato tal como lo guardaba la 1.7.2: firmas de 17 y 26 pt que no podían partirse.
+        anterior = (actual.replace(f"font-size:{tamano_firma(largo)}pt", "font-size:17pt")
+                    .replace(f"font-size:{tamano_firma(corto)}pt", "font-size:26pt")
+                    .replace("line-height: 1.1; }", "line-height: 1.1; white-space: nowrap; }")
+                    .replace(".firma { flex: 1; min-width: 0; text-align: center; }",
+                             ".firma { flex: 1; text-align: center; }"))
+        self.assertNotEqual(anterior, actual)
+        firmado = dict(c, contrato_html=anterior)
+        self.assertEqual(html_contrato(firmado, {}, {}), actual)
+        self.assertEqual(firmado["contrato_html"], anterior)     # el documento guardado no se modifica
+
+
+class ContratoEnWord(unittest.TestCase):
+    """«Imprimir» abre el contrato en Word: el .docx sale del mismo HTML que se firma y se guarda."""
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    setUp = ContratoImpreso.setUp          # el mismo contrato ficticio
+
+    def abrir(self, contenido):
+        with zipfile.ZipFile(io.BytesIO(contenido)) as paquete:
+            partes = {nombre: paquete.read(nombre) for nombre in paquete.namelist()}
+        for nombre, datos in partes.items():
+            if nombre.endswith((".xml", ".rels")):
+                ElementTree.fromstring(datos)                   # todo el XML está bien formado
+        return partes, ElementTree.fromstring(partes["word/document.xml"])
+
+    def texto(self, documento):
+        return "".join(t.text or "" for t in documento.iter(self.W + "t"))
+
+    def test_las_dos_hojas_en_a4_con_sus_datos(self):
+        partes, documento = self.abrir(docx_contrato(html_contrato(self.c, self.cli, self.t)))
+        self.assertLessEqual({"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/styles.xml",
+                              "word/settings.xml", "word/_rels/document.xml.rels"}, set(partes))
+        texto = self.texto(documento)
+        for frase in ("CONTRATO Y GARANTÍA", "CONTRATO DE TRABAJO", "PRIMERA:", "S/ 300.00", "12345678",
+                      "Ana <b>Pérez</b>", "Rosa & Sol"):              # los datos llegan como texto, no como marcas
+            self.assertIn(frase, texto)
+        self.assertNotIn("Imprimir", texto)                        # la barra con el botón es solo de pantalla
+        self.assertEqual(len(list(documento.iter(self.W + "pageBreakBefore"))), 1)   # cada hoja en su página
+        hoja = documento.find(f".//{self.W}sectPr/{self.W}pgSz")
+        self.assertEqual((hoja.get(self.W + "w"), hoja.get(self.W + "h")), ("11906", "16838"))   # A4
+
+    def test_firmas_con_nombre_y_dibujadas(self):
+        largo = "María del Carmen Rodríguez de la Villanueva"
+        c = dict(self.c, contrato_firmado="1", fecha_firma="30/09/2026 18:00",
+                 firma_cliente=json.dumps({"tipo": "nombre", "texto": largo}),
+                 firma_trabajadora=json.dumps({"w": 330, "h": 150, "trazos": [[10, 10, 200, 120, 320, 20]]}))
+        partes, documento = self.abrir(docx_contrato(html_contrato(c, self.cli, self.t), fuente_firma="Segoe Script"))
+        manuscritas = [r.find(f"{self.W}rPr/{self.W}sz").get(self.W + "val") for r in documento.iter(self.W + "r")
+                       if r.find(f"{self.W}rPr/{self.W}rFonts") is not None
+                       and r.find(f"{self.W}rPr/{self.W}rFonts").get(self.W + "ascii") == "Segoe Script"]
+        self.assertEqual(manuscritas, [str(2 * tamano_firma(largo))] * 2)    # la del empleador va en las dos hojas
+        self.assertEqual([n for n in partes if n.startswith("word/media/")], ["word/media/firma1.png"])
+        self.assertTrue(partes["word/media/firma1.png"].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertIn('Target="media/firma1.png"', partes["word/_rels/document.xml.rels"].decode("utf-8"))
+        self.assertIn("Firmas registradas en el sistema de la agencia el 30/09/2026 18:00.", self.texto(documento))
+
+    def test_contrato_firmado_conserva_su_texto_aunque_cambien_las_fichas(self):
+        firmado = dict(self.c, contrato_firmado="1", fecha_firma="30/09/2026 18:00",
+                       contrato_html=html_contrato(dict(self.c, contrato_firmado="1"), self.cli, self.t))
+        texto = self.texto(self.abrir(docx_contrato(html_contrato(firmado, {"nombre": "Otra persona"}, {})))[1])
+        self.assertIn("Ana <b>Pérez</b>", texto)
+        self.assertNotIn("Otra persona", texto)
+
+    def test_un_documento_sin_hojas_de_contrato_no_se_convierte(self):
+        with self.assertRaises(ValueError):
+            docx_contrato("<html><body><p>Sin hojas</p></body></html>")
+
+
+class VentanaDeImpresion(unittest.TestCase):
+    """«Imprimir» pregunta si el contrato se abre en Word o en PDF; sin Word, solo queda PDF."""
+
+    def setUp(self):
+        try:
+            self.root = agencia.tk.Tk()
+        except agencia.tk.TclError:
+            self.skipTest("no hay pantalla disponible")
+        self.root.withdraw()
+        self.addCleanup(self.root.destroy)
+        agencia.aplicar_tema(self.root)
+        parche = mock.patch.object(agencia.tk.Toplevel, "grab_set", lambda self: None)
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def test_se_elige_word_o_pdf_y_cancelar_no_elige_nada(self):
+        for boton, eleccion in (("word", "word"), ("pdf", "pdf")):
+            ventana = agencia.DialogoImprimir(self.root, 8)
+            ventana.botones[boton].invoke()
+            self.assertEqual(ventana.eleccion, eleccion)
+            self.assertFalse(ventana.winfo_exists())
+        ventana = agencia.DialogoImprimir(self.root, 8)
+        ventana.destroy()                                       # «Cancelar», Esc o la X
+        self.assertIsNone(ventana.eleccion)
+
+    def test_sin_word_solo_se_puede_elegir_pdf(self):
+        ventana = agencia.DialogoImprimir(self.root, 8, hay_word=False)
+        self.addCleanup(lambda: ventana.winfo_exists() and ventana.destroy())
+        self.assertTrue(ventana.botones["word"].instate(["disabled"]))
+        ventana.botones["word"].invoke()                        # deshabilitado: no hace nada
+        self.assertIsNone(ventana.eleccion)
+        ventana.botones["pdf"].invoke()
+        self.assertEqual(ventana.eleccion, "pdf")
+
+
+class ContratoEnPDF(unittest.TestCase):
+    """Sin Word, «Imprimir» abre el contrato en PDF (en el navegador): A4, letras estándar y nada fuera de la hoja."""
+    setUp = ContratoImpreso.setUp          # el mismo contrato ficticio
+
+    def textos(self, pdf):
+        """(texto, fuente, tamaño, x) de cada trozo escrito en las páginas."""
+        import zlib
+        trozos = []
+        for flujo in re_mod.findall(rb"stream\n(.*?)\nendstream", pdf, re_mod.S):
+            try:
+                contenido = zlib.decompress(flujo).decode("ascii")
+            except zlib.error:
+                continue                                   # la imagen de una firma dibujada
+            for fuente, tamano, x, cadena in re_mod.findall(
+                    r"/F(\d) ([\d.]+) Tf [\d. ]+rg 1 0 0 1 ([\d.]+) [\d.]+ Tm \((.*?)\) Tj ET", contenido):
+                datos = re_mod.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), cadena).encode("latin-1")
+                trozos.append((datos.decode("cp1252"), agencia._FUENTES_PDF[int(fuente) - 1], float(tamano), float(x)))
+        return trozos
+
+    def firmado(self):
+        largo = "María del Carmen Fernández de la Cruz Villanueva de Rodríguez"
+        return dict(self.c, contrato_firmado="1", fecha_firma="30/09/2026 18:00",
+                    firma_cliente=json.dumps({"tipo": "nombre", "texto": largo}),
+                    firma_trabajadora=json.dumps({"w": 330, "h": 150, "trazos": [[10, 10, 200, 120, 320, 20]]}))
+
+    def test_dos_hojas_a4_con_indice_valido(self):
+        pdf = agencia.pdf_contrato(html_contrato(self.firmado(), self.cli, self.t))
+        self.assertTrue(pdf.startswith(b"%PDF-1.4") and pdf.endswith(b"%%EOF\n"))
+        self.assertIn(b"/Count 2", pdf)                                # cada hoja del contrato en su página
+        self.assertIn(b"/MediaBox [0 0 595.28 841.89]", pdf)           # A4
+        indice = int(pdf.rsplit(b"startxref\n", 1)[1].split(b"\n")[0])
+        filas = [f for f in pdf[indice:].split(b"\n") if f.endswith(b" n ")]
+        for numero, fila in enumerate(filas, 1):                       # cada entrada apunta a su objeto
+            self.assertTrue(pdf[int(fila[:10]):].startswith(b"%d 0 obj" % numero))
+
+    def test_nada_se_sale_de_la_hoja_y_los_datos_llegan_como_texto(self):
+        trozos = self.textos(agencia.pdf_contrato(html_contrato(self.firmado(), self.cli, self.t)))
+        derecha = agencia._HojasPDF.ANCHO - agencia._HojasPDF.MARGEN_X
+        for texto, fuente, tamano, x in trozos:
+            self.assertGreaterEqual(x, agencia._HojasPDF.MARGEN_X - 0.5, texto)
+            self.assertLessEqual(x + agencia._ancho_pdf(texto, fuente, tamano), derecha + 0.5, texto)
+        palabras = [texto for texto, *_ in trozos]
+        for palabra in ("CONTRATO", "GARANTÍA", "TRABAJO", "PRIMERA:", "<b>Pérez</b>", "&", "12345678"):
+            self.assertIn(palabra, palabras)
+        self.assertNotIn("Imprimir", palabras)                     # la barra con el botón es solo de pantalla
+
+    def test_firma_con_nombre_en_cursiva_y_firma_dibujada_como_imagen(self):
+        c = self.firmado()
+        pdf = agencia.pdf_contrato(html_contrato(c, self.cli, self.t))
+        cursivas = [(texto, tamano) for texto, fuente, tamano, _ in self.textos(pdf) if fuente == "Times-Italic"]
+        tamano = tamano_firma(json.loads(c["firma_cliente"])["texto"])
+        self.assertTrue(cursivas and all(t == tamano for _, t in cursivas))   # la del empleador, en las dos hojas
+        self.assertEqual(pdf.count(b"/Subtype /Image"), 1)                     # la trabajadora firmó dibujando
+
+    def test_contrato_firmado_conserva_su_texto_aunque_cambien_las_fichas(self):
+        firmado = dict(self.c, contrato_firmado="1", fecha_firma="30/09/2026 18:00",
+                       contrato_html=html_contrato(dict(self.c, contrato_firmado="1"), self.cli, self.t))
+        palabras = [t for t, *_ in self.textos(agencia.pdf_contrato(html_contrato(firmado, {"nombre": "Otra"}, {})))]
+        self.assertIn("<b>Pérez</b>", palabras)
+        self.assertNotIn("Otra", palabras)
+
+    def test_un_documento_sin_hojas_de_contrato_no_se_convierte(self):
+        with self.assertRaises(ValueError):
+            agencia.pdf_contrato("<html><body><p>Sin hojas</p></body></html>")
 
 
 class RegistroDeErrores(unittest.TestCase):
@@ -264,6 +515,15 @@ class RegistroDeErrores(unittest.TestCase):
             texto = ruta.read_text(encoding="utf-8")
             self.assertIn("primero", texto)
             self.assertIn("segundo", texto)
+
+    def test_cada_error_anota_la_version_del_programa(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / "errores.log"
+            try:
+                raise ValueError("fallo de prueba")
+            except ValueError:
+                registrar_error(sys.exc_info(), ruta)
+            self.assertIn(f"versión {agencia.VERSION}", ruta.read_text(encoding="utf-8"))
 
     def test_una_ruta_imposible_no_provoca_otro_error(self):
         try:
@@ -564,10 +824,47 @@ class MotorDeCopias(unittest.TestCase):
         self.assertEqual(leer_configuracion(ruta), {"copia_adicional": "E:/USB"})
         Path(ruta).write_text("{ esto no es json")
         self.assertEqual(leer_configuracion(ruta), {})                                  # un archivo roto no impide abrir
-        externas = carpetas_externas({"copia_adicional": "E:/USB"})
-        self.assertEqual(len(externas), 2)
+        externas = carpetas_externas({"copia_adicional": "E:/USB"})                       # USB desconectado
+        self.assertEqual(len(externas), 1)
         self.assertTrue(externas[0].endswith("Respaldos " + agencia.AGENCIA_NOMBRE))
         self.assertEqual(carpetas_externas({"copia_adicional": externas[0]}), [externas[0]])   # sin duplicados
+        self.assertFalse(os.path.exists("E:/USB"))                                         # y no se creó
+
+    def test_en_cada_carpeta_externa_quedan_las_copias_de_30_dias(self):
+        self.con_datos()
+        externa = self.carpeta / "Documentos"
+        externa.mkdir()
+        ahora = datetime(2026, 10, 31, 9)
+        for dias in range(1, 36):                                                         # 35 días con su copia
+            (externa / f"agencia-{ahora - timedelta(days=dias):%Y%m%d}.db").write_bytes(b"")
+        copia_externa(self.ruta, str(externa), ahora)
+        diarias = sorted(p.name for p in externa.glob("agencia-*.db"))
+        self.assertEqual(len(diarias), 30)                                                # la regla: un mes de copias
+        self.assertEqual((diarias[0], diarias[-1]), (f"agencia-{ahora - timedelta(days=29):%Y%m%d}.db",
+                                                      "agencia-20261031.db"))
+
+    def test_al_traer_datos_de_la_version_portable_se_trae_su_carpeta_de_copias(self):
+        portable = self.carpeta / "Agencia portable"
+        portable.mkdir()
+        guardar_configuracion({"copia_adicional": "E:/Copias"}, str(portable / "configuracion.json"))
+        with mock.patch.object(agencia, "CONFIG_PATH", str(self.carpeta / "configuracion.json")):
+            self.assertEqual(agencia.traer_ajustes_anteriores(str(portable)), "E:/Copias")
+            self.assertEqual(leer_configuracion()["copia_adicional"], "E:/Copias")
+            guardar_configuracion({"copia_adicional": "F:/Otra"})                         # si ya había una, se respeta
+            self.assertIsNone(agencia.traer_ajustes_anteriores(str(portable)))
+            self.assertEqual(leer_configuracion()["copia_adicional"], "F:/Otra")
+
+    def test_la_carpeta_adicional_solo_se_usa_si_es_la_elegida(self):
+        usb = self.carpeta / "USB"
+        usb.mkdir()
+        self.assertEqual(len(carpetas_externas({"copia_adicional": str(usb)})), 1)        # otro USB con esa letra
+        agencia.marcar_carpeta_adicional(str(usb))                                         # al elegirla se marca
+        self.assertEqual(carpetas_externas({"copia_adicional": str(usb)})[1], str(usb))
+        anterior = self.carpeta / "Copias de antes"                                       # con copias de una versión
+        anterior.mkdir()                                                                   # anterior: se reconoce y marca
+        (anterior / "agencia-20260901.db").write_bytes(b"")
+        self.assertEqual(len(carpetas_externas({"copia_adicional": str(anterior)})), 2)
+        self.assertTrue((anterior / agencia.MARCA_COPIAS).exists())
 
 
 class DatosVaciosEnLaBase(unittest.TestCase):
@@ -580,6 +877,19 @@ class DatosVaciosEnLaBase(unittest.TestCase):
             db._memoria.clear()
             fila = db.todos("clientes")[0]
             self.assertEqual((fila["zona"], fila["estado"], fila["nombre"]), ("", "", "Ana"))
+            db.con.close()
+
+    def test_una_base_nueva_tiene_las_columnas_de_antes_en_el_mismo_orden(self):
+        # Quitar campos de las fichas no quita columnas: lo ya escrito se conserva y una base nueva es igual a las
+        # anteriores (la 1.7.0 de la prueba en Windows), con lo agregado después al final.
+        sql = (Path(__file__).parent / ".github" / "windows" / "vieja_1_7_0.sql").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as carpeta:
+            db = BaseDatos(Path(carpeta) / "agencia.db")
+            for tabla in ("clientes", "trabajadoras"):
+                antes = re_mod.search(rf"CREATE TABLE {tabla} \((.*?)\);", sql).group(1)
+                antes = [columna.split()[0] for columna in antes.split(", ")]
+                ahora = [fila[1] for fila in db.con.execute(f"PRAGMA table_info({tabla})")]
+                self.assertEqual(ahora[:len(antes)], antes)
             db.con.close()
 
 
@@ -1146,13 +1456,171 @@ class ProgramaConDatosProtegidos(unittest.TestCase):
         """Un cliente ya guardado, sin tocar el formulario que se está escribiendo."""
         return self.app.db.insertar("clientes", {"nombre": nombre, "telefono": "1", "estado": "Pendiente"})
 
-    def test_un_cambio_invalido_en_un_registro_que_ya_existe_no_lo_estropea(self):
+    def test_un_cambio_invalido_en_un_registro_que_ya_existe_no_lo_estropea_y_se_explica(self):
         cid = self.cliente_guardado("Ana")
         self.clientes.form.poner_valor("nombre", "")                                      # se borra un dato obligatorio
         self.clientes.form.poner_valor("zona", "Comas")
-        self.clientes.resolver_cambios()
+        self.respuestas["askyesno"] = False                                               # «No»: lo va a corregir
+        self.assertFalse(self.clientes.resolver_cambios())
         self.assertEqual(self.app.db.uno("clientes", cid)["nombre"], "Ana")               # sigue como estaba
-        self.assertEqual(self.sin_avisos(), [])
+        self.assertEqual(self.clientes.form.valor("zona"), "Comas")                       # y lo escrito, también
+        titulo, texto = self.sin_avisos()[-1]
+        self.assertEqual(titulo, "Cambios sin guardar")
+        self.assertIn("Nombre completo", texto)                                           # dice qué dato falta
+        self.respuestas["askyesno"] = True                                                # «Sí»: volver a lo guardado
+        self.assertTrue(self.clientes.resolver_cambios())
+        self.assertEqual((self.clientes.form.valor("nombre"), self.clientes.form.valor("zona")), ("Ana", ""))
+        self.assertEqual(self.app.db.uno("clientes", cid)["nombre"], "Ana")
+
+    def test_al_imprimir_la_pantalla_dice_donde_se_abrio_el_contrato(self):
+        cid = self.cliente_guardado("Ana")
+        tid = self.app.db.insertar("trabajadoras", {"nombre": "Rosa", "telefono": "1"})
+        aid = self.app.db.insertar("colocaciones", {"cliente_id": str(cid), "trabajadora_id": str(tid),
+                                                    "estado": "En proceso", "comision": "300.00"})
+        with tempfile.TemporaryDirectory() as carpeta, \
+                mock.patch.object(agencia, "CARPETA_CONTRATOS", carpeta), \
+                mock.patch.object(agencia, "elegir_impresion", return_value="pdf"), \
+                mock.patch.object(agencia, "abrir_con_programa", return_value=True) as abrir:
+            self.app.contratos.imprimir_contrato(self.app.db.uno("colocaciones", aid))
+        abrir.assert_called_once()                                          # una sola vez y nada se imprime solo
+        self.assertIn(f"El contrato N° {aid} se abrió en PDF", self.app.contratos.info.cget("text"))
+        self.assertIn("una sola vez", self.app.contratos.info.cget("text"))
+
+    def test_la_version_se_ve_en_el_menu_lateral(self):
+        textos = [w.cget("text") for w in self.app.lateral.winfo_children() if isinstance(w, agencia.tk.Label)]
+        self.assertIn(f"Versión {agencia.VERSION}", textos)
+
+    def test_la_ficha_de_la_trabajadora_no_tiene_estado_ni_notas_y_conserva_lo_guardado(self):
+        t = self.app.trabajadoras
+        self.assertNotIn("estado", t.form.tipos)
+        self.assertNotIn("notas", t.form.tipos)
+        self.assertNotIn((agencia.SECCION, "Estado"), agencia.CAMPOS_TRABAJADORA)
+        self.app.mostrar(t)
+        t.nuevo()
+        t.form.poner_valor("nombre", "Rosa"); t.form.poner_valor("telefono", "1")
+        self.assertTrue(t.guardar())
+        tid = t.id_actual
+        self.assertEqual(self.app.db.uno("trabajadoras", tid)["estado"], "Disponible")          # lo pone el programa
+        self.app.db.actualizar("trabajadoras", tid, {"notas": "Escrita con la versión anterior"})
+        t.form.poner_valor("zona", "Comas")
+        self.assertTrue(t.guardar())
+        fila = self.app.db.uno("trabajadoras", tid)
+        self.assertEqual((fila["zona"], fila["notas"], fila["estado"]),
+                         ("Comas", "Escrita con la versión anterior", "Disponible"))                # nada se pierde
+
+    def test_la_ficha_del_cliente_no_pide_fecha_ni_notas_y_conserva_lo_guardado(self):
+        for clave in ("fecha_necesita", "notas"):
+            self.assertNotIn(clave, self.clientes.form.tipos)
+        cid = self.cliente_guardado("Ana")
+        self.app.db.actualizar("clientes", cid, {"fecha_necesita": "Lo antes posible", "notas": "Llamar de tarde"})
+        self.clientes.form.poner_valor("zona", "Comas")
+        self.assertTrue(self.clientes.guardar())
+        fila = self.app.db.uno("clientes", cid)
+        self.assertEqual((fila["zona"], fila["fecha_necesita"], fila["notas"]),
+                         ("Comas", "Lo antes posible", "Llamar de tarde"))                    # escrito antes: se conserva
+
+    def test_una_trabajadora_no_disponible_de_antes_vuelve_a_las_listas(self):
+        tid = self.app.db.insertar("trabajadoras", {"nombre": "Rosa", "telefono": "1", "estado": "No disponible"})
+        self.app.refrescar_todo()
+        self.assertEqual(self.app.db.uno("trabajadoras", tid)["estado"], "Disponible")
+        self.app.abrir_area(None)
+        self.root.update()
+        self.assertIn(str(tid), self.app.enlazar.t_trab.get_children())                         # ya se puede asignar
+
+    def test_contratos_esta_en_el_menu_lateral_junto_a_areas(self):
+        lateral = self.app.lateral
+        orden = [w.etiqueta.cget("text") if isinstance(w, agencia.ItemMenu) else w.cget("text")
+                 for w in lateral.menu.winfo_children()]
+        self.assertEqual(orden, ["PERSONAS", "Clientes", "Trabajadoras", "ASIGNACIONES", "Áreas", "Contratos",
+                                 "FINANZAS", "Comisiones", "Ganancias", "SEGUIMIENTO", "Garantías"])
+        lateral.items[self.app.contratos].comando()                                       # clic en «Contratos»
+        self.assertIs(self.app.visible, self.app.contratos)
+        self.assertTrue(lateral.items[self.app.contratos].activo)
+        self.assertFalse(lateral.items[self.app.areas].activo)
+        self.app.abrir_area(None)                                         # dentro de un área se marca «Áreas»
+        self.assertTrue(lateral.items[self.app.areas].activo)
+        self.assertFalse(lateral.items[self.app.contratos].activo)
+
+    def test_ya_no_hay_boton_ver_asignaciones_ni_volver_a_areas(self):
+        def botones(w):
+            if w.winfo_class() in ("TButton", "Button"):
+                yield w.cget("text")
+            for hijo in w.winfo_children():
+                yield from botones(hijo)
+        textos = list(botones(self.root))
+        for accion in ("Deshacer asignación", "Registrar inicio", "Datos del contrato", "Imprimir", "Firmar contrato"):
+            self.assertIn(accion, textos)                                 # las acciones de los contratos siguen
+        self.assertNotIn("Ver asignaciones", textos)
+        self.assertEqual([t for t in textos if "Volver a" in t], [])
+
+    def test_al_asignar_se_abre_contratos_con_la_asignacion_nueva_elegida(self):
+        cid = self.cliente_guardado("Ana")
+        tid = self.app.db.insertar("trabajadoras", {"nombre": "Rosa", "telefono": "1", "estado": "Disponible"})
+        self.app.refrescar_todo()
+        enlazar = self.app.enlazar
+        self.app.abrir_area(None, cid)
+        self.root.update()
+        enlazar.t_trab.selection_set(str(tid))
+        recibido = {}
+        with mock.patch.object(agencia, "DialogoContrato",
+                               side_effect=lambda master, numero, valores, confirmar, **k:
+                               recibido.update(valores=dict(valores), confirmar=confirmar)):
+            enlazar.asignar()
+        self.assertTrue(recibido["confirmar"](dict(recibido["valores"])))
+        self.root.update()                                                # la vista cambia con la ventana libre
+        nueva = max(self.app.db.todos("colocaciones"), key=lambda c: c["id"])
+        contratos = self.app.contratos
+        self.assertIs(self.app.visible, contratos)
+        self.assertTrue(self.app.lateral.items[contratos].activo)
+        self.assertFalse(self.app.lateral.items[self.app.areas].activo)
+        self.assertEqual(contratos.filtro, "por_firmar")
+        self.assertEqual(contratos.lista.selection(), (str(nueva["id"]),))
+
+    def test_en_una_pantalla_baja_el_menu_lateral_entra_entero(self):
+        # Con la ventana oculta Tk no ubica los widgets: se da el lugar entre la marca y la versión y se mide
+        # el alto que pide el menú (la ventana real se comprueba en Windows al 100, 125 y 150 %).
+        lateral = self.app.lateral
+
+        def alto_con_lugar(disponible):
+            with mock.patch.object(lateral.menu, "winfo_y", return_value=0), \
+                    mock.patch.object(lateral.version, "winfo_y", return_value=disponible):
+                lateral.ajustar_alto()
+            self.root.update_idletasks()
+            return lateral.menu.winfo_reqheight()
+
+        normal = alto_con_lugar(10_000)
+        self.assertEqual(lateral.relleno, agencia.ItemMenu.RELLENO)
+        self.assertLessEqual(alto_con_lugar(normal - 40), normal - 40)    # 40 px menos: las opciones se acercan
+        self.assertLess(lateral.relleno, agencia.ItemMenu.RELLENO)
+        self.assertEqual(alto_con_lugar(normal), normal)                  # con lugar, vuelve el espacio normal
+        self.assertEqual(lateral.relleno, agencia.ItemMenu.RELLENO)
+
+    def test_el_reemplazo_no_cobra_comision_y_conserva_los_meses_de_garantia(self):
+        cid = self.cliente_guardado("Ana")
+        primera = self.app.db.insertar("trabajadoras", {"nombre": "Rosa", "telefono": "1", "estado": "Disponible"})
+        segunda = self.app.db.insertar("trabajadoras", {"nombre": "Luz", "telefono": "2", "estado": "Disponible"})
+        datos = {clave: "" for clave in agencia.claves(agencia.CAMPOS_COLOCACION)}
+        datos.update(cliente_id=str(cid), trabajadora_id=str(primera), fecha_enlace="01/09/2026",
+                     fecha_contrato="01/09/2026", estado="En proceso", sueldo_acordado="1500", comision="300.00",
+                     garantia="Sí", meses_garantia="3")
+        anterior = self.app.crear_asignacion(datos)
+        self.app.iniciar_asignacion(self.app.db.uno("colocaciones", anterior), date(2026, 9, 1))
+        self.app.solicitar_reemplazo(self.app.db.uno("colocaciones", anterior))
+        self.app.refrescar_todo()
+        enlazar = self.app.enlazar
+        enlazar.poner_area(None, cid)
+        self.root.update()
+        enlazar.t_trab.selection_set(str(segunda))
+        recibido = {}
+        with mock.patch.object(agencia, "DialogoContrato",
+                               side_effect=lambda master, numero, valores, confirmar, **k:
+                               recibido.update(valores=dict(valores), confirmar=confirmar)):
+            enlazar.asignar()
+        self.assertEqual((recibido["valores"]["comision"], recibido["valores"]["meses_garantia"]), ("0.00", "3"))
+        self.assertTrue(recibido["confirmar"](dict(recibido["valores"])))
+        nueva = max(self.app.db.todos("colocaciones"), key=lambda c: c["id"])
+        self.assertEqual((nueva["comision"], nueva["reemplazo_de"], nueva["meses_garantia"], nueva["trabajadora_id"]),
+                         ("0.00", str(anterior), "3", str(segunda)))
 
     def test_al_pulsar_nuevo_lo_que_se_editaba_se_guarda_solo(self):
         cid = self.cliente_guardado("Ana")

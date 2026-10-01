@@ -8,10 +8,14 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+if not os.environ.get("AGENCIA_DATOS"):      # nunca la carpeta de datos real, aunque se pruebe desde el proyecto
+    os.environ["AGENCIA_DATOS"] = tempfile.mkdtemp(prefix="agencia-pruebas-")
 
 import agencia
 
@@ -81,7 +85,7 @@ class ConservacionFinalTest(unittest.TestCase):
         actualizado = self.db.uno("colocaciones", self.id)
         self.assertEqual(agencia.html_contrato(actualizado, {}, {}), original)
         self.assertEqual(actualizado["contrato_html"], original)
-        self.assertIn("window.print()", agencia.html_contrato(actualizado, {}, {}, imprimir=True))
+        self.assertNotIn(agencia._IMPRESION_AUTOMATICA, agencia.html_contrato(actualizado, {}, {}))   # nunca solo
 
     def test_firma_rechaza_cambio_de_comision_en_otra_conexion(self):
         guardar = self.abrir_firma()
@@ -180,17 +184,71 @@ class ConservacionFinalTest(unittest.TestCase):
         c = self.firmar()
         self.db.eliminar("clientes", self.cli)
         self.db.eliminar("trabajadoras", self.trab)
-        with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), patch("webbrowser.open") as navegador, \
-                patch.object(agencia.os, "startfile", create=True) as windows:   # en Windows se abre con os.startfile
+        with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), \
+                patch.object(agencia, "elegir_impresion", return_value="word"), \
+                patch.object(agencia, "abrir_con_programa", return_value=True) as abrir:
             self.pagina.imprimir_contrato(c)
+        abrir.assert_called_once_with(self.root / f"contrato_{self.id}.docx")
+        with zipfile.ZipFile(self.root / f"contrato_{self.id}.docx") as documento:
+            self.assertIn("Cliente ficticio", documento.read("word/document.xml").decode("utf-8"))
+
+    def test_contrato_abierto_en_word_se_imprime_con_otro_nombre(self):
+        c = self.firmar()
+        anterior = self.root / f"contrato_{self.id}.docx"
+        anterior.write_text("Documento anterior, abierto en Word")
+        (self.root / ("~$" + anterior.name[2:])).write_text("propietario")   # lo que deja Word mientras lo tiene abierto
+        with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), \
+                patch.object(agencia, "elegir_impresion", return_value="word"), \
+                patch.object(agencia, "abrir_con_programa", return_value=True) as abrir:
+            self.pagina.imprimir_contrato(c)
+        abierto = abrir.call_args.args[0]
+        self.assertNotEqual(abierto, anterior)                     # Word mostraría su ventana vieja, sin firmas
+        self.assertTrue(abierto.name.startswith(f"contrato_{self.id}_") and abierto.suffix == ".docx")
+        self.assertEqual(anterior.read_text(), "Documento anterior, abierto en Word")
+        with zipfile.ZipFile(abierto) as documento:
+            self.assertIn("Firmas registradas", documento.read("word/document.xml").decode("utf-8"))
+
+    def test_al_elegir_pdf_el_contrato_se_abre_en_pdf(self):
+        c = self.firmar()
+        with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), \
+                patch.object(agencia, "elegir_impresion", return_value="pdf"), \
+                patch.object(agencia, "abrir_con_programa", return_value=True) as abrir:
+            self.pagina.imprimir_contrato(c)
+        abrir.assert_called_once_with(self.root / f"contrato_{self.id}.pdf")
+        self.assertTrue((self.root / f"contrato_{self.id}.pdf").read_bytes().startswith(b"%PDF-"))
+        self.assertFalse((self.root / f"contrato_{self.id}.docx").exists())
+
+    def test_cancelar_la_ventana_de_impresion_no_escribe_ni_abre_nada(self):
+        c = self.firmar()
+        with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root / "contratos")), \
+                patch.object(agencia, "elegir_impresion", return_value=None) as elegir, \
+                patch.object(agencia, "abrir_con_programa") as abrir, patch("webbrowser.open") as navegador:
+            self.pagina.imprimir_contrato(c)
+        elegir.assert_called_once_with(self.pagina, self.id)
+        abrir.assert_not_called()
+        navegador.assert_not_called()
+        self.assertFalse((self.root / "contratos").exists())
+
+    def test_si_nada_lo_abre_el_contrato_se_imprime_desde_el_navegador(self):
+        c = self.firmar()
+        with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), \
+                patch.object(agencia, "elegir_impresion", return_value="word"), \
+                patch.object(agencia, "abrir_con_programa", return_value=False) as abrir, \
+                patch("webbrowser.open") as navegador, \
+                patch.object(agencia.os, "startfile", create=True) as windows:   # en Windows, os.startfile
+            self.pagina.imprimir_contrato(c)
+        self.assertEqual([llamada.args[0].suffix for llamada in abrir.call_args_list], [".docx", ".pdf"])
         self.assertEqual(navegador.call_count + windows.call_count, 1)
-        self.assertIn("Cliente ficticio", (self.root / f"contrato_{self.id}.html").read_text(encoding="utf-8"))
+        pagina = (self.root / f"contrato_{self.id}.html").read_text(encoding="utf-8")
+        self.assertIn('<button onclick="window.print()">Imprimir</button>', pagina)
+        self.assertNotIn(agencia._IMPRESION_AUTOMATICA, pagina)                  # se imprime solo si se pulsa
 
     def test_impresion_fallida_no_trunca_documento_anterior(self):
         c = self.firmar()
-        ruta = self.root / f"contrato_{self.id}.html"
+        ruta = self.root / f"contrato_{self.id}.docx"
         ruta.write_text("Documento anterior")
         with patch.object(agencia, "CARPETA_CONTRATOS", str(self.root)), \
+                patch.object(agencia, "elegir_impresion", return_value="word"), \
                 patch.object(agencia.os, "replace", side_effect=OSError("sin permiso")):
             with self.assertRaises(OSError):
                 self.pagina.imprimir_contrato(c)
@@ -338,11 +396,12 @@ class ConservacionFinalTest(unittest.TestCase):
         ventana.destroy.assert_called_once()
 
     def test_html_y_resumen_formatean_centavos_con_el_mismo_redondeo(self):
-        self.db.actualizar("colocaciones", self.id, {"comision": "2.675", "sueldo_acordado": "1.015"})
+        # (un sueldo «1.015» sería mil quince: un sueldo nunca lleva tres decimales; ver normalizar_sueldo)
+        self.db.actualizar("colocaciones", self.id, {"comision": "2.675", "sueldo_acordado": "1800.015"})
         c = self.db.uno("colocaciones", self.id)
         documento = agencia.html_contrato(c, self.db.uno("clientes", self.cli), self.db.uno("trabajadoras", self.trab))
         self.assertIn("S/ 2.68", documento)
-        self.assertIn("S/ 1.02", documento)
+        self.assertIn("S/ 1,800.02", documento)
 
     def test_error_de_copia_resuelto_se_avisa_si_vuelve_a_ocurrir(self):
         self.app._errores_avisados = set()
@@ -403,6 +462,7 @@ class ConservacionFinalTest(unittest.TestCase):
             with self.subTest(valor=valor):
                 rutas = agencia.carpetas_externas({"copia_adicional": valor})
                 self.assertEqual(len(rutas), 1)
+        agencia.marcar_carpeta_adicional(str(self.root))                  # la carpeta elegida lleva la marca
         self.assertEqual(len(agencia.carpetas_externas({"copia_adicional": str(self.root)})), 2)
         self.assertEqual(len(agencia.carpetas_externas([])), 1)
 

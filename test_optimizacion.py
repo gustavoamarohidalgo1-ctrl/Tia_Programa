@@ -8,6 +8,9 @@ from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+if not os.environ.get("AGENCIA_DATOS"):      # nunca la carpeta de datos real, aunque se pruebe desde el proyecto
+    os.environ["AGENCIA_DATOS"] = tempfile.mkdtemp(prefix="agencia-pruebas-")
+
 import agencia
 
 

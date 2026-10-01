@@ -10,6 +10,9 @@ import tempfile
 import unittest
 from unittest import mock
 
+if not os.environ.get("AGENCIA_DATOS"):      # nunca la carpeta de datos real, aunque se pruebe desde el proyecto
+    os.environ["AGENCIA_DATOS"] = tempfile.mkdtemp(prefix="agencia-pruebas-")
+
 import agencia
 
 EN_WINDOWS = sys.platform == "win32"
